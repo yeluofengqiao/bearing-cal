@@ -1,100 +1,157 @@
-import pandas as pd
-import streamlit as st
+import csv
+import io
+import os
+
+from flask import Flask, Response, render_template, request
 
 from bearing_model import Bearing6208CapacitanceModel
 
 
-def build_detail_frame(result):
-    rows = [detail.to_dict() for detail in result.details]
-    frame = pd.DataFrame(rows)
-    return frame.rename(
-        columns={
-            "angle_deg": "角度 (deg)",
-            "load_q_n": "载荷 Q (N)",
-            "max_stress_mpa": "最大应力 (MPa)",
-            "truncation_ratio_pct": "椭圆截断率 (%)",
-            "film_thickness_um": "油膜厚度 (um)",
-            "capacitance_pf": "单球电容 (pF)",
-            "contact_angle_deg": "接触角 (deg)",
-        }
-    )
+app = Flask(__name__)
 
 
-st.set_page_config(
-    page_title="6208 轴承电容计算器",
-    layout="centered",
-)
+DEFAULT_INPUTS = {
+    "fr": 3000.0,
+    "fa": 1500.0,
+    "speed_rpm": 3000.0,
+}
 
-st.title("6208 轴承机电联合仿真计算器")
-st.caption("基于现有 6208 轴承电容模型封装，适合手机浏览器直接访问。")
 
-with st.sidebar:
-    st.subheader("说明")
-    st.write("输入载荷和转速后，页面会计算总电容、位移，以及每颗钢球的载荷明细。")
-    st.write("默认模型参数来自你的原始脚本，后续可以继续扩展为更多轴承型号。")
+def detail_rows(result):
+    rows = []
+    for detail in result.details:
+        if detail.truncation_ratio_pct == 0.0:
+            truncation_status = "0.0% (安全)"
+        elif detail.truncation_ratio_pct <= 15.0:
+            truncation_status = f"{detail.truncation_ratio_pct:.1f}% (允许)"
+        else:
+            truncation_status = f"{detail.truncation_ratio_pct:.1f}% (NG/超标)"
 
-with st.form("bearing_form"):
-    col1, col2 = st.columns(2)
-    with col1:
-        fr = st.number_input("径向载荷 Fr (N)", min_value=0.0, value=3000.0, step=100.0)
-        fa = st.number_input("轴向载荷 Fa (N)", min_value=0.0, value=1500.0, step=100.0)
-    with col2:
-        speed_rpm = st.number_input(
-            "转速 (rpm)",
-            min_value=0.0,
-            value=3000.0,
-            step=100.0,
-        )
-    submitted = st.form_submit_button("开始计算", use_container_width=True)
-
-if submitted:
-    model = Bearing6208CapacitanceModel()
-    result = model.calculate(fr=fr, fa=fa, speed_rpm=speed_rpm)
-    detail_df = build_detail_frame(result)
-
-    if result.solver_converged:
-        st.success("求解收敛。")
-    else:
-        st.warning("求解器未正常收敛，结果可供参考，但建议检查输入工况。")
-
-    metric_col1, metric_col2 = st.columns(2)
-    with metric_col1:
-        st.metric("系统最终等效电容", f"{result.system_capacitance_pf:.2f} pF")
-        st.metric("油膜总电容", f"{result.oil_capacitance_pf:.2f} pF")
-    with metric_col2:
-        st.metric("PPS 层电容", f"{result.pps_capacitance_pf:.2f} pF")
-        st.metric("径向/轴向位移", f"{result.radial_displacement_mm*1000:.1f} / {result.axial_displacement_mm*1000:.1f} um")
-
-    st.subheader("角度分布")
-    chart_df = detail_df.set_index("角度 (deg)")[
-        ["载荷 Q (N)", "单球电容 (pF)", "接触角 (deg)"]
-    ]
-    st.line_chart(chart_df, height=280)
-
-    st.subheader("钢球明细")
-    st.dataframe(
-        detail_df.style.format(
+        rows.append(
             {
-                "角度 (deg)": "{:.0f}",
-                "载荷 Q (N)": "{:.2f}",
-                "最大应力 (MPa)": "{:.2f}",
-                "椭圆截断率 (%)": "{:.2f}",
-                "油膜厚度 (um)": "{:.4f}",
-                "单球电容 (pF)": "{:.4f}",
-                "接触角 (deg)": "{:.2f}",
+                "angle_deg": detail.angle_deg,
+                "load_q_n": detail.load_q_n,
+                "max_stress_mpa": detail.max_stress_mpa,
+                "truncation_ratio_pct": detail.truncation_ratio_pct,
+                "truncation_status": truncation_status,
+                "film_thickness_um": detail.film_thickness_um,
+                "capacitance_pf": detail.capacitance_pf,
+                "contact_angle_deg": detail.contact_angle_deg,
+                "is_active": detail.load_q_n > 0,
             }
-        ),
-        use_container_width=True,
-        height=380,
+        )
+    return rows
+
+
+def parse_inputs(source):
+    values = {}
+    for key, default_value in DEFAULT_INPUTS.items():
+        raw_value = source.get(key, default_value)
+        values[key] = float(raw_value)
+    return values
+
+
+def build_summary(result, rows):
+    active_rows = [row for row in rows if row["is_active"]]
+    peak_load = max((row["load_q_n"] for row in active_rows), default=0.0)
+    peak_capacitance = max((row["capacitance_pf"] for row in active_rows), default=0.0)
+    return {
+        "active_ball_count": len(active_rows),
+        "peak_load_q_n": peak_load,
+        "peak_ball_capacitance_pf": peak_capacitance,
+        "solver_status": "求解收敛" if result.solver_converged else "求解未收敛",
+    }
+
+
+def run_calculation(inputs):
+    model = Bearing6208CapacitanceModel()
+    result = model.calculate(
+        fr=inputs["fr"],
+        fa=inputs["fa"],
+        speed_rpm=inputs["speed_rpm"],
+    )
+    rows = detail_rows(result)
+    summary = build_summary(result, rows)
+    return result, rows, summary
+
+
+def build_csv(rows):
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "angle_deg",
+            "load_q_n",
+            "contact_angle_deg",
+            "max_stress_mpa",
+            "truncation_ratio_pct",
+            "film_thickness_um",
+            "capacitance_pf",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                f"{row['angle_deg']:.0f}",
+                f"{row['load_q_n']:.4f}",
+                f"{row['contact_angle_deg']:.4f}",
+                f"{row['max_stress_mpa']:.4f}",
+                f"{row['truncation_ratio_pct']:.4f}",
+                f"{row['film_thickness_um']:.6f}",
+                f"{row['capacitance_pf']:.6f}",
+            ]
+        )
+    return buffer.getvalue()
+
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    inputs = DEFAULT_INPUTS.copy()
+    result = None
+    rows = []
+    summary = None
+    error_message = None
+
+    if request.method == "POST":
+        try:
+            inputs = parse_inputs(request.form)
+            if any(value < 0 for value in inputs.values()):
+                raise ValueError("输入值不能为负数。")
+            result, rows, summary = run_calculation(inputs)
+        except ValueError as exc:
+            error_message = str(exc)
+
+    return render_template(
+        "index.html",
+        inputs=inputs,
+        result=result,
+        rows=rows,
+        summary=summary,
+        error_message=error_message,
     )
 
-    csv_data = detail_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "下载明细 CSV",
-        data=csv_data,
-        file_name="bearing_6208_results.csv",
-        mime="text/csv",
-        use_container_width=True,
+
+@app.get("/download.csv")
+def download_csv():
+    try:
+        inputs = parse_inputs(request.args)
+        result, rows, _ = run_calculation(inputs)
+    except ValueError as exc:
+        return Response(str(exc), status=400, mimetype="text/plain")
+
+    if not result.solver_converged:
+        return Response("求解器未收敛，未生成 CSV。", status=400, mimetype="text/plain")
+
+    csv_text = build_csv(rows)
+    return Response(
+        csv_text,
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename=bearing_6208_results.csv"
+        },
     )
-else:
-    st.info("填入参数后点击“开始计算”。")
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=True)
