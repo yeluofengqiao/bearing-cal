@@ -3,59 +3,74 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>6208 轴承机电联合仿真计算器</title>
-    <link
-      rel="preconnect"
-      href="https://fonts.googleapis.com"
-    />
-    <link
-      rel="preconnect"
-      href="https://fonts.gstatic.com"
-      crossorigin
-    />
+    <title>通用轴承机电联合仿真计算器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap"
       rel="stylesheet"
     />
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='styles.css') }}"
-    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
   </head>
   <body>
     <main class="page">
       <section class="hero">
         <div class="hero-copy">
           <p class="eyebrow">GitHub + Render</p>
-          <h1>6208 轴承机电联合仿真计算器</h1>
+          <h1>通用轴承机电联合仿真计算器</h1>
           <p class="hero-text">
-            直接在手机浏览器输入载荷和转速，输出系统等效电容、位移结果和每颗钢球的接触明细。
+            不再固定 6208。你现在可以直接输入钢球数、钢球直径、节圆直径、沟道曲率、游隙、材料和润滑参数，网页会按当前输入重新计算。
           </p>
         </div>
         <div class="hero-note">
-          <span>模型来源</span>
-          <strong>现有 6208 电容计算脚本</strong>
-          <small>网页层已改为通用 Flask 应用，适合 Render 部署。</small>
+          <span>当前模型说明</span>
+          <strong>默认值仍然是 6208</strong>
+          <small>你可以从默认值出发，逐项替换成其他轴承几何和材料参数。</small>
         </div>
       </section>
 
-      <section class="panel">
-        <form method="post" class="input-grid">
-          <label class="field">
-            <span>径向载荷 Fr (N)</span>
-            <input type="number" name="fr" min="0" step="100" value="{{ inputs.fr }}" required />
-          </label>
-          <label class="field">
-            <span>轴向载荷 Fa (N)</span>
-            <input type="number" name="fa" min="0" step="100" value="{{ inputs.fa }}" required />
-          </label>
-          <label class="field">
-            <span>转速 (rpm)</span>
-            <input type="number" name="speed_rpm" min="0" step="100" value="{{ inputs.speed_rpm }}" required />
-          </label>
-          <button type="submit" class="primary-button">开始计算</button>
-        </form>
+      <section class="panel notes-panel">
+        <h2>从计算上必须给定的输入</h2>
+        <ul class="notes-list">
+          {% for note in parameter_notes %}
+          <li>{{ note }}</li>
+          {% endfor %}
+        </ul>
       </section>
+
+      <form method="post" class="input-stack">
+        {% for group in input_groups %}
+        <section class="panel input-section">
+          <div class="section-head">
+            <h2>{{ group.title }}</h2>
+            <p>{{ group.description }}</p>
+          </div>
+          <div class="input-grid">
+            {% for field in group.fields %}
+            <label class="field">
+              <span>{{ field.label }} {% if field.unit %}({{ field.unit }}){% endif %}</span>
+              <input
+                type="number"
+                name="{{ field.name }}"
+                value="{{ inputs[field.name] }}"
+                step="{{ field.step }}"
+                {% if field.min is defined %}min="{{ field.min }}"{% endif %}
+                {% if field.max is defined %}max="{{ field.max }}"{% endif %}
+                required
+              />
+              {% if field.help %}
+              <small class="field-help">{{ field.help }}</small>
+              {% endif %}
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+
+        <section class="panel submit-panel">
+          <button type="submit" class="primary-button">开始计算</button>
+        </section>
+      </form>
 
       {% if error_message %}
       <section class="panel alert">
@@ -80,11 +95,7 @@
         </article>
         <article class="metric-card">
           <span>径向 / 轴向位移</span>
-          <strong>
-            {{ "%.1f"|format(result.radial_displacement_mm * 1000) }}
-            /
-            {{ "%.1f"|format(result.axial_displacement_mm * 1000) }} um
-          </strong>
+          <strong>{{ "%.1f"|format(result.radial_displacement_mm * 1000) }} / {{ "%.1f"|format(result.axial_displacement_mm * 1000) }} um</strong>
         </article>
       </section>
 
@@ -102,23 +113,25 @@
           <strong>{{ "%.1f"|format(summary.peak_load_q_n) }} N</strong>
         </article>
         <article class="summary-card">
-          <span>最大单球电容</span>
-          <strong>{{ "%.2f"|format(summary.peak_ball_capacitance_pf) }} pF</strong>
+          <span>最大接触角</span>
+          <strong>{{ "%.2f"|format(summary.peak_contact_angle_deg) }} deg</strong>
         </article>
       </section>
 
       <section class="panel panel-header">
         <div>
           <h2>钢球明细</h2>
-          <p>按角度展示每颗钢球的载荷、接触角、应力、膜厚和电容。</p>
+          <p>角度表反映每颗钢球在当前输入参数下的受载、电容和油膜状态。</p>
         </div>
         {% if result.solver_converged %}
-        <a
-          class="ghost-button"
-          href="{{ url_for('download_csv', fr=inputs.fr, fa=inputs.fa, speed_rpm=inputs.speed_rpm) }}"
-        >
-          下载 CSV
-        </a>
+        <form method="get" action="{{ url_for('download_csv') }}">
+          {% for group in input_groups %}
+            {% for field in group.fields %}
+          <input type="hidden" name="{{ field.name }}" value="{{ inputs[field.name] }}" />
+            {% endfor %}
+          {% endfor %}
+          <button type="submit" class="ghost-button">下载 CSV</button>
+        </form>
         {% endif %}
       </section>
 

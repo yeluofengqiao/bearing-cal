@@ -30,38 +30,86 @@ class CalculationResult:
     details: list[BallDetail]
 
 
-class Bearing6208CapacitanceModel:
-    def __init__(self):
-        # 1. 轴承几何参数 (6208)
-        self.d = 40.0
-        self.D = 80.0
-        self.B = 18.0
-        self.Dw = 11.906
-        self.Dm = 60.0
-        self.Z = 9
-        self.fi = 0.505
-        self.fe = 0.525
-        self.Pd = 0.010
-        self.L = self.Dw * (self.fi + self.fe - 1)
+@dataclass
+class BearingParameters:
+    d: float = 40.0
+    D: float = 80.0
+    B: float = 18.0
+    Dw: float = 11.906
+    Dm: float = 60.0
+    Z: int = 9
+    fi: float = 0.505
+    fe: float = 0.525
+    Pd: float = 0.010
+    H_i: float = 2.3812
+    E: float = 2.06e5
+    nu: float = 0.3
+    eta0: float = 0.015
+    alpha: float = 1.5e-8
+    eps_r: float = 2.1
+    t_pps: float = 2.0
+    eps_r_pps: float = 4.2
 
-        # 沟道深度参数 (假设约为钢球直径的 20%)
-        self.H_i = 0.20 * self.Dw
-        self.H_e = 0.20 * self.Dw
+    @property
+    def L(self):
+        return self.Dw * (self.fi + self.fe - 1)
 
-        # 2. 材料力学属性
-        self.E = 2.06e5
-        self.nu = 0.3
-        self.E_prime = self.E / (1 - self.nu**2)
+    @property
+    def E_prime(self):
+        return self.E / (1 - self.nu**2)
 
-        # 3. 润滑油与电气参数 (70 degC)
-        self.eta0 = 0.015
-        self.alpha = 1.5e-8
-        self.eps_r = 2.1
-        self.eps_0 = 8.854e-12
+    @property
+    def eps_0(self):
+        return 8.854e-12
 
-        # 4. PPS+50%GF 包塑层参数
-        self.t_pps = 2.0
-        self.eps_r_pps = 4.2
+    def to_dict(self):
+        return asdict(self)
+
+    def validate(self):
+        positive_fields = {
+            "d": self.d,
+            "D": self.D,
+            "B": self.B,
+            "Dw": self.Dw,
+            "Dm": self.Dm,
+            "fi": self.fi,
+            "fe": self.fe,
+            "H_i": self.H_i,
+            "E": self.E,
+            "eta0": self.eta0,
+            "alpha": self.alpha,
+            "eps_r": self.eps_r,
+            "t_pps": self.t_pps,
+            "eps_r_pps": self.eps_r_pps,
+        }
+        for name, value in positive_fields.items():
+            if value <= 0:
+                raise ValueError(f"{name} 必须大于 0。")
+
+        if self.Z < 1:
+            raise ValueError("钢球数 Z 必须至少为 1。")
+        if self.Pd < 0:
+            raise ValueError("直径游隙 Pd 不能为负数。")
+        if not 0 < self.nu < 0.5:
+            raise ValueError("泊松比 nu 需要在 0 和 0.5 之间。")
+        if self.D <= self.d:
+            raise ValueError("外径 D 必须大于内径 d。")
+        if self.Dm <= self.Dw:
+            raise ValueError("节圆直径 Dm 必须大于钢球直径 Dw。")
+        if self.D <= 2 * self.t_pps:
+            raise ValueError("PPS 厚度过大，导致包塑层内径无效。")
+        if self.fi + self.fe <= 1:
+            raise ValueError("沟道曲率系数 fi + fe 必须大于 1。")
+
+        r_inner = self.fi * self.Dw
+        if self.H_i >= 2 * r_inner:
+            raise ValueError("内圈沟道深度 H_i 过大，超过几何允许范围。")
+
+
+class BearingCapacitanceModel:
+    def __init__(self, params=None):
+        self.params = params or BearingParameters()
+        self.params.validate()
 
     def _solve_elliptical_param(self, cos_tau):
         cos_tau = np.clip(cos_tau, 1e-6, 0.9999)
@@ -83,13 +131,14 @@ class Bearing6208CapacitanceModel:
         return k_val, e_val, k_ratio
 
     def get_contact_stiffness(self, is_inner):
-        rho11 = rho12 = 2 / self.Dw
+        p = self.params
+        rho11 = rho12 = 2 / p.Dw
         if is_inner:
-            rho21 = -1 / (self.fi * self.Dw)
-            rho22 = -2 / (self.Dm - self.Dw)
+            rho21 = -1 / (p.fi * p.Dw)
+            rho22 = -2 / (p.Dm - p.Dw)
         else:
-            rho21 = -1 / (self.fe * self.Dw)
-            rho22 = 2 / (self.Dm + self.Dw)
+            rho21 = -1 / (p.fe * p.Dw)
+            rho22 = 2 / (p.Dm + p.Dw)
 
         sum_rho = rho11 + rho12 + rho21 + rho22
         diff_rho = (rho11 - rho12) + (rho21 - rho22)
@@ -98,7 +147,7 @@ class Bearing6208CapacitanceModel:
         k_el, e_el, k_hd = self._solve_elliptical_param(cos_tau)
 
         q_test = 1.0
-        term_common_1n = (3 * q_test) / (2 * sum_rho * self.E_prime)
+        term_common_1n = (3 * q_test) / (2 * sum_rho * p.E_prime)
         a_star = (2 * (k_hd**2) * e_el / np.pi) ** (1 / 3)
         delta_star = (2 * k_el) / (np.pi * a_star)
 
@@ -112,7 +161,7 @@ class Bearing6208CapacitanceModel:
         if q <= 1e-5:
             return 0.0, 0.0, 0.0, 0.0
 
-        term_common = (3 * q) / (2 * sum_rho * self.E_prime)
+        term_common = (3 * q) / (2 * sum_rho * self.params.E_prime)
         a_star = (2 * (k_ratio**2) * e_val / np.pi) ** (1 / 3)
         b_star = (2 * e_val / (np.pi * k_ratio)) ** (1 / 3)
 
@@ -124,6 +173,10 @@ class Bearing6208CapacitanceModel:
         return area, a, b, p_max
 
     def calculate(self, fr, fa, speed_rpm):
+        if fr < 0 or fa < 0 or speed_rpm < 0:
+            raise ValueError("Fr、Fa、speed_rpm 不能为负数。")
+
+        p = self.params
         ki, ki_hd, sum_rho_i, e_val_i, rx_i_mm = self.get_contact_stiffness(
             is_inner=True
         )
@@ -132,7 +185,7 @@ class Bearing6208CapacitanceModel:
         )
 
         k_tot = 1 / (((1 / ki) ** (2 / 3) + (1 / ke) ** (2 / 3)) ** 1.5)
-        angles = np.linspace(0, 2 * np.pi, self.Z, endpoint=False)
+        angles = np.linspace(0, 2 * np.pi, p.Z, endpoint=False)
 
         def equilibrium_equations(vars_um):
             dr = vars_um[0] * 1e-3
@@ -140,10 +193,10 @@ class Bearing6208CapacitanceModel:
             fx = 0.0
             fz = 0.0
             for psi in angles:
-                term_r = self.L + dr * np.cos(psi)
+                term_r = p.L + dr * np.cos(psi)
                 term_a = da
                 l_new = np.sqrt(term_r**2 + term_a**2)
-                delta = l_new - self.L - (self.Pd / 2)
+                delta = l_new - p.L - (p.Pd / 2)
                 if delta > 0:
                     q = k_tot * delta**1.5
                     fx += q * (term_r / l_new) * np.cos(psi)
@@ -160,21 +213,17 @@ class Bearing6208CapacitanceModel:
 
         total_oil_cap = 0.0
         details = []
-        u_vel_i = (
-            (np.pi * speed_rpm * self.Dm / 120) * (1 - (self.Dw / self.Dm) ** 2) / 1000
-        )
-        u_vel_e = (
-            (np.pi * speed_rpm * self.Dm / 120) * (1 + (self.Dw / self.Dm) ** 2) / 1000
-        )
+        u_vel_i = (np.pi * speed_rpm * p.Dm / 120) * (1 - (p.Dw / p.Dm) ** 2) / 1000
+        u_vel_e = (np.pi * speed_rpm * p.Dm / 120) * (1 + (p.Dw / p.Dm) ** 2) / 1000
 
-        r_inner = self.fi * self.Dw
-        theta_edge_i = np.arccos(1.0 - self.H_i / r_inner)
+        r_inner = p.fi * p.Dw
+        theta_edge_i = np.arccos(1.0 - p.H_i / r_inner)
 
         for psi in angles:
-            term_r = self.L + dr_mm * np.cos(psi)
+            term_r = p.L + dr_mm * np.cos(psi)
             term_a = da_mm
             l_new = np.sqrt(term_r**2 + term_a**2)
-            delta = l_new - self.L - (self.Pd / 2)
+            delta = l_new - p.L - (p.Pd / 2)
 
             if delta <= 0:
                 details.append(
@@ -192,11 +241,11 @@ class Bearing6208CapacitanceModel:
 
             q = k_tot * delta**1.5
             alpha_contact = np.arcsin(term_a / l_new)
-            g_param = self.alpha * (self.E_prime * 1e6)
+            g_param = p.alpha * (p.E_prime * 1e6)
 
             rx_i = rx_i_mm / 1000
-            u_i = (self.eta0 * u_vel_i) / (self.E_prime * 1e6 * rx_i)
-            w_i = q / ((self.E_prime * 1e6) * rx_i**2)
+            u_i = (p.eta0 * u_vel_i) / (p.E_prime * 1e6 * rx_i)
+            w_i = q / ((p.E_prime * 1e6) * rx_i**2)
             k_effect_i = 1 - 0.61 * np.exp(-0.73 * ki_hd)
             hc_i = 2.69 * (u_i**0.67) * (g_param**0.53) * (w_i**-0.067) * k_effect_i
             h_i = hc_i * rx_i * 1000
@@ -204,7 +253,7 @@ class Bearing6208CapacitanceModel:
             area_i, a_i, _, pmax_i = self._get_hertz_params(q, sum_rho_i, ki_hd, e_val_i)
             c_in = 0.0
             if h_i > 0:
-                c_in = (self.eps_0 * self.eps_r * area_i * 1e-6) / (h_i * 1e-3) * 1e12
+                c_in = (p.eps_0 * p.eps_r * area_i * 1e-6) / (h_i * 1e-3) * 1e12
 
             s_avail_i = r_inner * (theta_edge_i - alpha_contact)
             if a_i > s_avail_i:
@@ -213,8 +262,8 @@ class Bearing6208CapacitanceModel:
                 trunc_ratio_i = 0.0
 
             rx_e = rx_e_mm / 1000
-            u_e = (self.eta0 * u_vel_e) / (self.E_prime * 1e6 * rx_e)
-            w_e = q / ((self.E_prime * 1e6) * rx_e**2)
+            u_e = (p.eta0 * u_vel_e) / (p.E_prime * 1e6 * rx_e)
+            w_e = q / ((p.E_prime * 1e6) * rx_e**2)
             k_effect_e = 1 - 0.61 * np.exp(-0.73 * ke_hd)
             hc_e = 2.69 * (u_e**0.67) * (g_param**0.53) * (w_e**-0.067) * k_effect_e
             h_e = hc_e * rx_e * 1000
@@ -222,7 +271,7 @@ class Bearing6208CapacitanceModel:
             area_e, _, _, _ = self._get_hertz_params(q, sum_rho_e, ke_hd, e_val_e)
             c_out = 0.0
             if h_e > 0:
-                c_out = (self.eps_0 * self.eps_r * area_e * 1e-6) / (h_e * 1e-3) * 1e12
+                c_out = (p.eps_0 * p.eps_r * area_e * 1e-6) / (h_e * 1e-3) * 1e12
 
             if c_in > 0 and c_out > 0:
                 c_ball = 1 / (1 / c_in + 1 / c_out)
@@ -242,12 +291,10 @@ class Bearing6208CapacitanceModel:
                 )
             )
 
-        l_m = self.B * 1e-3
-        d_out = self.D
-        d_in = self.D - 2 * self.t_pps
-        c_pps = (
-            (2 * np.pi * self.eps_0 * self.eps_r_pps * l_m) / np.log(d_out / d_in) * 1e12
-        )
+        l_m = p.B * 1e-3
+        d_out = p.D
+        d_in = p.D - 2 * p.t_pps
+        c_pps = (2 * np.pi * p.eps_0 * p.eps_r_pps * l_m) / np.log(d_out / d_in) * 1e12
 
         if total_oil_cap > 0:
             c_system_total = 1 / (1 / total_oil_cap + 1 / c_pps)
@@ -263,3 +310,6 @@ class Bearing6208CapacitanceModel:
             solver_converged=ier == 1,
             details=details,
         )
+
+
+Bearing6208CapacitanceModel = BearingCapacitanceModel

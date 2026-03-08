@@ -95,6 +95,11 @@ p {
   margin: 0;
 }
 
+ul {
+  margin: 0;
+  padding: 0;
+}
+
 h1 {
   font-size: clamp(32px, 4vw, 52px);
   line-height: 0.98;
@@ -112,6 +117,35 @@ h1 {
   margin-bottom: 18px;
 }
 
+.notes-panel h2,
+.section-head h2 {
+  margin-bottom: 8px;
+}
+
+.notes-list {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+
+.notes-list li {
+  padding-left: 18px;
+  position: relative;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.notes-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-2);
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -119,9 +153,23 @@ h1 {
   gap: 12px;
 }
 
+.input-stack {
+  display: contents;
+}
+
+.input-section {
+  display: grid;
+  gap: 16px;
+}
+
+.section-head p {
+  max-width: 56rem;
+  line-height: 1.55;
+}
+
 .input-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   align-items: end;
 }
@@ -132,6 +180,10 @@ h1 {
   gap: 10px;
   font-size: 14px;
   font-weight: 700;
+}
+
+.field span {
+  line-height: 1.35;
 }
 
 .field input {
@@ -147,6 +199,18 @@ h1 {
 .field input:focus {
   outline: 2px solid rgba(17, 75, 58, 0.28);
   border-color: transparent;
+}
+
+.field-help {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.submit-panel {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .primary-button,
