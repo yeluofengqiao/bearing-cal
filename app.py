@@ -131,6 +131,11 @@ def index():
     )
 
 
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}, 200
+
+
 @app.get("/download.csv")
 def download_csv():
     try:
