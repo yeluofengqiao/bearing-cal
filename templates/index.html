@@ -50,12 +50,13 @@
             <label class="field">
               <span>{{ field.label }} {% if field.unit %}({{ field.unit }}){% endif %}</span>
               <input
-                type="number"
+                type="text"
                 name="{{ field.name }}"
                 value="{{ inputs[field.name] }}"
-                step="{{ field.step }}"
-                {% if field.min is defined %}min="{{ field.min }}"{% endif %}
-                {% if field.max is defined %}max="{{ field.max }}"{% endif %}
+                inputmode="{{ 'numeric' if field.type == 'int' else 'decimal' }}"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
                 required
               />
               {% if field.help %}

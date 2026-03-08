@@ -141,11 +141,17 @@ def detail_rows(result):
 def parse_inputs(source):
     values = {}
     for name, field in FIELD_MAP.items():
-        raw_value = source.get(name, DEFAULT_INPUTS[name])
-        if field["type"] == "int":
-            values[name] = int(raw_value)
-        else:
-            values[name] = float(raw_value)
+        raw_value = str(source.get(name, DEFAULT_INPUTS[name])).strip()
+        if raw_value == "":
+            raise ValueError(f"{field['label']} 不能为空。")
+
+        try:
+            if field["type"] == "int":
+                values[name] = int(raw_value)
+            else:
+                values[name] = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{field['label']} 需要输入有效数字。") from exc
     return values
 
 
