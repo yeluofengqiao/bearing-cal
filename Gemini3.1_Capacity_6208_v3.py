@@ -17,10 +17,9 @@ if __name__ == "__main__":
         print("求解异常: 请检查载荷输入是否过于离谱")
 
     print(f"系统最终等效电容: C_sys_total = {result.system_capacitance_pf:.2f} pF\n")
-    print(f"EHL 油膜摩擦力矩: M_EHL = {result.ehl_friction_torque_nmm:.3f} N·mm ({result.ehl_friction_torque_nm:.6f} N·m)\n")
 
-    print(f"{'角度(°)':<8} {'载荷 Q(N)':<10} {'接触角(°)':<10} {'最大应力(MPa)':<14} {'椭圆截断率':<18} {'内/外膜厚(um)':<20} {'电容(pF)':<10} {'单球力矩(N·mm)':<16}")
-    print("-" * 122)
+    print(f"{'角度(°)':<8} {'载荷 Q(N)':<10} {'接触角(°)':<10} {'最大应力(MPa)':<14} {'椭圆截断率':<18} {'膜厚(um)':<10} {'电容(pF)':<10}")
+    print("-" * 85)
     for row in result.details:
         if row.load_q_n > 0:
             t_ratio = row.truncation_ratio_pct
@@ -36,11 +35,10 @@ if __name__ == "__main__":
             print(
                 f"{row.angle_deg:<8.0f} {row.load_q_n:<10.1f} {alpha_deg:<10.1f} "
                 f"{row.max_stress_mpa:<14.1f} {trunc_str:<18} "
-                f"{f'{row.film_thickness_um:.3f}/{row.outer_film_thickness_um:.3f}':<20} "
-                f"{row.capacitance_pf:<10.2f} {row.ehl_friction_torque_nmm:<16.3f}"
+                f"{row.film_thickness_um:<10.3f} {row.capacitance_pf:<10.2f}"
             )
         else:
             print(
                 f"{row.angle_deg:<8.0f} {'---':<10} {'---':<10} {'---':<14} "
-                f"{'---':<18} {'---':<20} {'0.00':<10} {'---':<16}"
+                f"{'---':<18} {'---':<10} {'0.00':<10}"
             )

@@ -1,6 +1,6 @@
 # 6208 Bearing Render App
 
-这是一个把 6208 轴承机电联合仿真脚本封装成普通网页的示例项目，适合部署到 GitHub + Render，并通过手机浏览器直接访问。当前版本同时计算油膜电容、基于 EHL 油膜剪切的摩擦力矩，以及基于油品黏温曲线的 `ν(T)`、`κ` 和 `λ`。
+这是一个把 6208 轴承机电联合仿真脚本封装成普通网页的示例项目，适合部署到 GitHub + Render，并通过手机浏览器直接访问。
 
 ## 本地运行
 
@@ -20,7 +20,7 @@ python3 app.py
 
 ## 项目结构
 
-- `bearing_model.py`: 计算核心，包含载荷分布、Hamrock-Dowson 膜厚、ASTM D341 黏度换算、κ/λ、电容和 EHL 摩擦力矩
+- `bearing_model.py`: 计算核心
 - `app.py`: Flask 网页入口
 - `templates/index.html`: 页面模板
 - `static/styles.css`: 页面样式
