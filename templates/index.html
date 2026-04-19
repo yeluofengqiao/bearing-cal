@@ -14,18 +14,26 @@
   </head>
   <body>
     <main class="page">
+      <nav class="top-nav">
+        <a class="nav-pill active" href="{{ url_for('index') }}">机电联合仿真</a>
+        <a class="nav-pill" href="{{ url_for('tapered_preload') }}">圆锥预压垫片</a>
+      </nav>
+
       <section class="hero">
         <div class="hero-copy">
           <p class="eyebrow">GitHub + Render</p>
           <h1>通用轴承机电联合仿真计算器</h1>
           <p class="hero-text">
-            不再固定 6208。你现在可以直接输入钢球数、钢球直径、节圆直径、沟道曲率、游隙、材料和润滑参数，网页会按当前输入重新计算。
+            不再固定 6208。你现在可以直接输入轴承尺寸、载荷、转速，以及油品的 ν40 / ν100 / 温度，网页会自动换算当前黏度，并同时给出油膜厚度、λ、κ、电容和 EHL 摩擦力矩。
           </p>
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('tapered_preload') }}">切换到圆锥预压垫片工具</a>
+          </div>
         </div>
         <div class="hero-note">
           <span>当前模型说明</span>
           <strong>默认值仍然是 6208</strong>
-          <small>你可以从默认值出发，逐项替换成其他轴承几何和材料参数。</small>
+          <small>κ 采用参考黏度法，λ 采用 λ = h / σ；内外圈滑滚比由程序按几何和接触角自动估算。</small>
         </div>
       </section>
 
@@ -83,6 +91,26 @@
       {% if result %}
       <section class="metrics">
         <article class="metric-card">
+          <span>当前运动黏度 ν(T)</span>
+          <strong>{{ "%.3f"|format(result.operating_kinematic_viscosity_cst) }} cSt</strong>
+        </article>
+        <article class="metric-card">
+          <span>参考黏度 ν1</span>
+          <strong>{{ "%.3f"|format(result.reference_kinematic_viscosity_cst) }} cSt</strong>
+        </article>
+        <article class="metric-card">
+          <span>κ</span>
+          <strong>{{ "%.3f"|format(result.kappa) }}</strong>
+        </article>
+        <article class="metric-card">
+          <span>最小内圈膜厚</span>
+          <strong>{{ "%.3f"|format(result.minimum_film_thickness_um) }} um</strong>
+        </article>
+        <article class="metric-card">
+          <span>最小 λ</span>
+          <strong>{{ "%.2f"|format(result.minimum_lambda) }}</strong>
+        </article>
+        <article class="metric-card">
           <span>系统最终等效电容</span>
           <strong>{{ "%.2f"|format(result.system_capacitance_pf) }} pF</strong>
         </article>
@@ -97,6 +125,10 @@
         <article class="metric-card">
           <span>径向 / 轴向位移</span>
           <strong>{{ "%.1f"|format(result.radial_displacement_mm * 1000) }} / {{ "%.1f"|format(result.axial_displacement_mm * 1000) }} um</strong>
+        </article>
+        <article class="metric-card">
+          <span>EHL 总摩擦力矩</span>
+          <strong>{{ "%.3f"|format(result.ehl_friction_torque_nmm) }} N·mm</strong>
         </article>
       </section>
 
@@ -117,12 +149,75 @@
           <span>最大接触角</span>
           <strong>{{ "%.2f"|format(summary.peak_contact_angle_deg) }} deg</strong>
         </article>
+        <article class="summary-card">
+          <span>最小外圈膜厚</span>
+          <strong>{{ "%.3f"|format(summary.minimum_outer_film_thickness_um) }} um</strong>
+        </article>
+        <article class="summary-card">
+          <span>最小外圈 λ</span>
+          <strong>{{ "%.2f"|format(summary.minimum_outer_lambda) }}</strong>
+        </article>
+        <article class="summary-card">
+          <span>最大单球 EHL 力矩</span>
+          <strong>{{ "%.3f"|format(summary.peak_ball_torque_nmm) }} N·mm</strong>
+        </article>
+        <article class="summary-card">
+          <span>最大内/外圈滑滚比</span>
+          <strong>{{ "%.4f"|format(summary.peak_inner_slip_ratio) }} / {{ "%.4f"|format(summary.peak_outer_slip_ratio) }}</strong>
+        </article>
       </section>
+
+      <section class="panel recommendation-panel recommendation-{{ summary.recommendation.level }}">
+        <div class="recommendation-head">
+          <div>
+            <p class="recommendation-kicker">Lubrication Guidance</p>
+            <h2>润滑建议</h2>
+          </div>
+          <span class="status-pill {{ summary.recommendation.level }}">{{ summary.recommendation.level_label }}</span>
+        </div>
+        <p class="recommendation-text recommendation-headline">{{ summary.recommendation.headline }}</p>
+        <p class="recommendation-text">{{ summary.recommendation.summary }}</p>
+        <ul class="recommendation-list">
+          {% for action in summary.recommendation.actions %}
+          <li>{{ action }}</li>
+          {% endfor %}
+        </ul>
+        <p class="recommendation-note">{{ summary.recommendation.note }}</p>
+      </section>
+
+      {% if summary.recommendation.alerts %}
+      <section class="panel anomaly-panel">
+        <div class="recommendation-head">
+          <div>
+            <p class="recommendation-kicker">Consistency Check</p>
+            <h2>反向 / 异常提醒</h2>
+          </div>
+        </div>
+        <div class="anomaly-stack">
+          {% for alert in summary.recommendation.alerts %}
+          <article class="anomaly-card anomaly-{{ alert.level }}">
+            <div class="recommendation-head">
+              <div>
+                <h3>{{ alert.title }}</h3>
+              </div>
+              <span class="status-pill {{ alert.level }}">{{ alert.level_label }}</span>
+            </div>
+            <p class="recommendation-text">{{ alert.body }}</p>
+            <ul class="recommendation-list">
+              {% for action in alert.actions %}
+              <li>{{ action }}</li>
+              {% endfor %}
+            </ul>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
 
       <section class="panel panel-header">
         <div>
           <h2>钢球明细</h2>
-          <p>角度表反映每颗钢球在当前输入参数下的受载、电容和油膜状态。</p>
+          <p>角度表反映每颗钢球在当前输入参数下的受载、电容、膜厚和 λ 状态。</p>
         </div>
         {% if result.solver_converged %}
         <form method="get" action="{{ url_for('download_csv') }}">
@@ -145,8 +240,11 @@
               <th>接触角 (deg)</th>
               <th>最大应力 (MPa)</th>
               <th>椭圆截断率</th>
-              <th>油膜厚度 (um)</th>
+              <th>内/外圈膜厚 (um)</th>
+              <th>内/外圈 λ</th>
+              <th>内/外圈滑滚比</th>
               <th>单球电容 (pF)</th>
+              <th>单球 EHL 力矩 (N·mm)</th>
             </tr>
           </thead>
           <tbody>
@@ -157,8 +255,11 @@
               <td>{{ "%.2f"|format(row.contact_angle_deg) if row.is_active else "---" }}</td>
               <td>{{ "%.2f"|format(row.max_stress_mpa) if row.is_active else "---" }}</td>
               <td>{{ row.truncation_status if row.is_active else "---" }}</td>
-              <td>{{ "%.4f"|format(row.film_thickness_um) if row.is_active else "---" }}</td>
+              <td>{{ "%.4f"|format(row.film_thickness_um) if row.is_active else "---" }} / {{ "%.4f"|format(row.outer_film_thickness_um) if row.is_active else "---" }}</td>
+              <td>{{ "%.2f"|format(row.lambda_value) if row.is_active else "---" }} / {{ "%.2f"|format(row.outer_lambda_value) if row.is_active else "---" }}</td>
+              <td>{{ "%.4f"|format(row.estimated_slip_ratio_inner) if row.is_active else "---" }} / {{ "%.4f"|format(row.estimated_slip_ratio_outer) if row.is_active else "---" }}</td>
               <td>{{ "%.4f"|format(row.capacitance_pf) }}</td>
+              <td>{{ "%.4f"|format(row.ehl_friction_torque_nmm) if row.is_active else "---" }}</td>
             </tr>
             {% endfor %}
           </tbody>

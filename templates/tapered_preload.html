@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>圆锥滚子轴承预压垫片推荐计算器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="page">
+      <nav class="top-nav">
+        <a class="nav-pill" href="{{ url_for('index') }}">机电联合仿真</a>
+        <a class="nav-pill active" href="{{ url_for('tapered_preload') }}">圆锥预压垫片</a>
+      </nav>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Tapered Roller Bearing</p>
+          <h1>圆锥滚子轴承预压垫片推荐计算器</h1>
+          <p class="hero-text">
+            这个页面把左右轴承、座孔结构和轴看成轴向串联刚度，并叠加铝合金座孔热膨胀，给出常温装配时的连续推荐厚度和离散垫片点。
+          </p>
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('index') }}">返回机电联合仿真工具</a>
+          </div>
+        </div>
+        <div class="hero-note">
+          <span>当前模型说明</span>
+          <strong>重点解决热态留隙问题</strong>
+          <small>默认按“更薄更紧”理解垫片方向；若你们的结构相反，可以切换成“更厚更紧”。</small>
+        </div>
+      </section>
+
+      <section class="panel notes-panel">
+        <h2>建模说明</h2>
+        <ul class="notes-list">
+          {% for note in parameter_notes %}
+          <li>{{ note }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <form method="post" class="input-stack">
+        {% for group in input_groups %}
+        <section class="panel input-section">
+          <div class="section-head">
+            <h2>{{ group.title }}</h2>
+            <p>{{ group.description }}</p>
+          </div>
+          <div class="input-grid">
+            {% for field in group.fields %}
+            <label class="field">
+              <span>{{ field.label }} {% if field.unit %}({{ field.unit }}){% endif %}</span>
+              {% if field.type == "select" %}
+              <select name="{{ field.name }}">
+                {% for option in field.options %}
+                <option value="{{ option.value }}" {% if inputs[field.name] == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
+              <input
+                type="text"
+                name="{{ field.name }}"
+                value="{{ inputs[field.name] }}"
+                inputmode="decimal"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                required
+              />
+              {% endif %}
+              {% if field.help %}
+              <small class="field-help">{{ field.help }}</small>
+              {% endif %}
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+
+        <section class="panel submit-panel">
+          <button type="submit" class="primary-button">生成推荐垫片点</button>
+        </section>
+      </form>
+
+      {% if error_message %}
+      <section class="panel alert">
+        <strong>输入错误</strong>
+        <p>{{ error_message }}</p>
+      </section>
+      {% endif %}
+
+      {% if result %}
+      <section class="metrics">
+        <article class="metric-card">
+          <span>总等效刚度</span>
+          <strong>{{ "%.0f"|format(result.equivalent_stiffness_n_per_mm) }} N/mm</strong>
+        </article>
+        <article class="metric-card">
+          <span>座孔热膨胀</span>
+          <strong>{{ "%.3f"|format(result.housing_thermal_growth_mm) }} mm</strong>
+        </article>
+        <article class="metric-card">
+          <span>热态下限对应冷装预紧</span>
+          <strong>{{ "%.0f"|format(result.minimum_cold_preload_n) }} N</strong>
+        </article>
+        <article class="metric-card">
+          <span>热态目标对应冷装预紧</span>
+          <strong>{{ "%.0f"|format(result.target_cold_preload_n) }} N</strong>
+        </article>
+        <article class="metric-card">
+          <span>连续推荐垫片</span>
+          <strong>{{ "%.3f"|format(result.nominal_shim_mm) }} mm</strong>
+        </article>
+        <article class="metric-card">
+          <span>离散推荐点</span>
+          <strong>{{ "%.3f"|format(result.selected_shim_mm) }} mm</strong>
+        </article>
+        <article class="metric-card">
+          <span>推荐点冷态预紧</span>
+          <strong>{{ "%.0f"|format(summary.selected_cold_preload_n) }} N</strong>
+        </article>
+        <article class="metric-card">
+          <span>推荐点热态预紧</span>
+          <strong>{{ "%.0f"|format(summary.selected_hot_preload_n) }} N</strong>
+        </article>
+      </section>
+
+      <section class="panel recommendation-panel">
+        <h2>推荐结论</h2>
+        <p class="recommendation-text">
+          常温零游隙基准垫片为 {{ "%.3f"|format(inputs.zero_endplay_shim_mm) }} mm 时，
+          连续理论值建议{{ summary.nominal_action }} {{ "%.3f"|format(summary.nominal_adjustment_abs_mm) }} mm，
+          即 {{ "%.3f"|format(result.nominal_shim_mm) }} mm。
+          按 {{ "%.3f"|format(inputs.shim_step_mm) }} mm 分档后，优先点推荐为
+          {{ "%.3f"|format(result.selected_shim_mm) }} mm。
+        </p>
+        <p class="recommendation-text">
+          该推荐点预计冷态预紧力约 {{ "%.0f"|format(summary.selected_cold_preload_n) }} N，
+          热态预紧力约 {{ "%.0f"|format(summary.selected_hot_preload_n) }} N；
+          {% if summary.selected_hot_clearance_um > 0 %}
+          热态仍可能留隙 {{ "%.1f"|format(summary.selected_hot_clearance_um) }} um。
+          {% else %}
+          相对热态最小预紧力富余 {{ "%.0f"|format(summary.selected_margin_to_min_hot_preload_n) }} N。
+          {% endif %}
+        </p>
+      </section>
+
+      <section class="summary-grid">
+        <article class="summary-card">
+          <span>热态最小连续厚度</span>
+          <strong>{{ "%.3f"|format(result.minimum_shim_mm) }} mm</strong>
+        </article>
+        <article class="summary-card">
+          <span>目标干涉位移</span>
+          <strong>{{ "%.1f"|format(result.target_interference_mm * 1000.0) }} um</strong>
+        </article>
+        <article class="summary-card">
+          <span>最小干涉位移</span>
+          <strong>{{ "%.1f"|format(result.minimum_interference_mm * 1000.0) }} um</strong>
+        </article>
+        <article class="summary-card">
+          <span>推荐点相对连续值偏差</span>
+          <strong>{{ "%.1f"|format(result.selected_point.delta_from_nominal_mm * 1000.0) }} um</strong>
+        </article>
+        <article class="summary-card">
+          <span>推荐点热态余量</span>
+          <strong>{{ "%.0f"|format(summary.selected_margin_to_min_hot_preload_n) }} N</strong>
+        </article>
+        <article class="summary-card">
+          <span>推荐点热态间隙</span>
+          <strong>{{ "%.1f"|format(summary.selected_hot_clearance_um) }} um</strong>
+        </article>
+      </section>
+
+      <section class="deformation-grid">
+        <article class="panel">
+          <div class="section-head">
+            <h2>冷态弹性压缩分解</h2>
+            <p>该分解用于看预紧力分别落在左右轴承、座孔和轴上的弹性位移。</p>
+          </div>
+          <div class="mini-table">
+            <div><span>左轴承</span><strong>{{ "%.3f"|format(result.selected_point.cold_deflection.left_bearing_mm) }} mm</strong></div>
+            <div><span>右轴承</span><strong>{{ "%.3f"|format(result.selected_point.cold_deflection.right_bearing_mm) }} mm</strong></div>
+            <div><span>座孔结构</span><strong>{{ "%.3f"|format(result.selected_point.cold_deflection.housing_mm) }} mm</strong></div>
+            <div><span>轴</span><strong>{{ "%.3f"|format(result.selected_point.cold_deflection.shaft_mm) }} mm</strong></div>
+            <div><span>合计</span><strong>{{ "%.3f"|format(result.selected_point.cold_deflection.total_mm) }} mm</strong></div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <h2>热态剩余压缩分解</h2>
+            <p>热态下，座孔膨胀会先吃掉一部分装配干涉，剩余部分才体现为热态预紧力。</p>
+          </div>
+          <div class="mini-table">
+            <div><span>左轴承</span><strong>{{ "%.3f"|format(result.selected_point.hot_deflection.left_bearing_mm) }} mm</strong></div>
+            <div><span>右轴承</span><strong>{{ "%.3f"|format(result.selected_point.hot_deflection.right_bearing_mm) }} mm</strong></div>
+            <div><span>座孔结构</span><strong>{{ "%.3f"|format(result.selected_point.hot_deflection.housing_mm) }} mm</strong></div>
+            <div><span>轴</span><strong>{{ "%.3f"|format(result.selected_point.hot_deflection.shaft_mm) }} mm</strong></div>
+            <div><span>合计</span><strong>{{ "%.3f"|format(result.selected_point.hot_deflection.total_mm) }} mm</strong></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel panel-header">
+        <div>
+          <h2>垫片点比较</h2>
+          <p>下面给出连续理论值附近的 5 个离散厚度点，方便你直接选标准垫片。</p>
+        </div>
+      </section>
+
+      <section class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>厚度点 (mm)</th>
+              <th>相对连续值偏差 (um)</th>
+              <th>冷态预紧 (N)</th>
+              <th>冷态间隙 (um)</th>
+              <th>热态预紧 (N)</th>
+              <th>热态间隙 (um)</th>
+              <th>相对热态下限余量 (N)</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in point_rows %}
+            <tr class="{{ 'selected-row' if row.is_selected else '' }}">
+              <td>{{ "%.3f"|format(row.shim_mm) }}</td>
+              <td>{{ "%.1f"|format(row.delta_from_nominal_um) }}</td>
+              <td>{{ "%.0f"|format(row.cold_preload_n) }}</td>
+              <td>{{ "%.1f"|format(row.cold_clearance_um) }}</td>
+              <td>{{ "%.0f"|format(row.hot_preload_n) }}</td>
+              <td>{{ "%.1f"|format(row.hot_clearance_um) }}</td>
+              <td>{{ "%.0f"|format(row.margin_to_min_hot_preload_n) }}</td>
+              <td>{{ row.status }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>
