@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>B40 球轴承刚度矩阵计算器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="page">
+      <nav class="top-nav">
+        <a class="nav-pill" href="{{ url_for('index') }}">机电联合仿真</a>
+        <a class="nav-pill" href="{{ url_for('tapered_preload') }}">圆锥预压垫片</a>
+        <a class="nav-pill active" href="{{ url_for('ball_stiffness') }}">球轴承刚度矩阵</a>
+      </nav>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">B40-119 Ball Bearing</p>
+          <h1>球轴承刚度矩阵计算器</h1>
+          <p class="hero-text">
+            输入球轴承几何、材料和外载荷后，程序会求解内圈 5 自由度平衡点，并输出 Fx/Fy/Fz/Mx/My 对 x/y/z/theta_x/theta_y 的切线刚度矩阵。
+          </p>
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('index') }}">返回机电联合仿真工具</a>
+            <a class="ghost-button" href="{{ url_for('tapered_preload') }}">切换到圆锥预压垫片工具</a>
+          </div>
+        </div>
+        <div class="hero-note">
+          <span>默认参数</span>
+          <strong>B40-119 非标轴承</strong>
+          <small>Z=8，Dw=15.875 mm，PCD=66.5 mm，ri=8.075 mm，re=8.3125 mm。</small>
+        </div>
+      </section>
+
+      <section class="panel notes-panel">
+        <h2>建模说明</h2>
+        <ul class="notes-list">
+          {% for note in parameter_notes %}
+          <li>{{ note }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <form method="post" class="input-stack">
+        {% for group in input_groups %}
+        <section class="panel input-section">
+          <div class="section-head">
+            <h2>{{ group.title }}</h2>
+            <p>{{ group.description }}</p>
+          </div>
+          <div class="input-grid">
+            {% for field in group.fields %}
+            <label class="field">
+              <span>{{ field.label }} {% if field.unit %}({{ field.unit }}){% endif %}</span>
+              <input
+                type="text"
+                name="{{ field.name }}"
+                value="{{ inputs[field.name] }}"
+                inputmode="{{ 'numeric' if field.type == 'int' else 'decimal' }}"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                required
+              />
+              {% if field.help %}
+              <small class="field-help">{{ field.help }}</small>
+              {% endif %}
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+
+        <section class="panel submit-panel">
+          <button type="submit" class="primary-button">计算刚度矩阵</button>
+        </section>
+      </form>
+
+      {% if error_message %}
+      <section class="panel alert">
+        <strong>输入错误</strong>
+        <p>{{ error_message }}</p>
+      </section>
+      {% endif %}
+
+      {% if result %}
+      <section class="metrics">
+        <article class="metric-card">
+          <span>求解状态</span>
+          <strong class="{{ 'good' if result.solver_converged else 'warn' }}">{{ "已收敛" if result.solver_converged else "需复核" }}</strong>
+        </article>
+        <article class="metric-card">
+          <span>参与接触钢球数</span>
+          <strong>{{ result.active_ball_count }}</strong>
+        </article>
+        <article class="metric-card">
+          <span>最大单球载荷</span>
+          <strong>{{ "%.1f"|format(result.peak_ball_load_n) }} N</strong>
+        </article>
+        <article class="metric-card">
+          <span>最大接触角</span>
+          <strong>{{ "%.2f"|format(result.max_contact_angle_deg) }} deg</strong>
+        </article>
+        <article class="metric-card">
+          <span>综合 Hertz 系数</span>
+          <strong>{{ "%.3e"|format(result.contact_stiffness_n_per_mm15) }}</strong>
+        </article>
+        <article class="metric-card">
+          <span>fi / fe</span>
+          <strong>{{ "%.4f"|format(result.inner_curvature_ratio) }} / {{ "%.4f"|format(result.outer_curvature_ratio) }}</strong>
+        </article>
+        <article class="metric-card">
+          <span>轨道径推算游隙</span>
+          <strong>{{ "%.4f"|format(result.raceway_derived_clearance_mm) }} mm</strong>
+        </article>
+        <article class="metric-card">
+          <span>矩阵非对称误差</span>
+          <strong>{{ "%.3f"|format(result.symmetry_error_pct) }}%</strong>
+        </article>
+      </section>
+
+      <section class="summary-grid">
+        <article class="summary-card">
+          <span>x / y 平衡位移</span>
+          <strong>{{ "%.2f"|format(displacement_summary.x_um) }} / {{ "%.2f"|format(displacement_summary.y_um) }} um</strong>
+        </article>
+        <article class="summary-card">
+          <span>z 平衡位移</span>
+          <strong>{{ "%.2f"|format(displacement_summary.z_um) }} um</strong>
+        </article>
+        <article class="summary-card">
+          <span>theta_x / theta_y</span>
+          <strong>{{ "%.2f"|format(displacement_summary.theta_x_urad) }} / {{ "%.2f"|format(displacement_summary.theta_y_urad) }} urad</strong>
+        </article>
+        <article class="summary-card">
+          <span>最大力残差</span>
+          <strong>{{ "%.4f"|format(displacement_summary.max_force_residual_n) }} N</strong>
+        </article>
+        <article class="summary-card">
+          <span>最大力矩残差</span>
+          <strong>{{ "%.4f"|format(displacement_summary.max_moment_residual_nmm) }} N·mm</strong>
+        </article>
+      </section>
+
+      <section class="panel panel-header">
+        <div>
+          <h2>5×5 刚度矩阵</h2>
+          <p>行是广义力，列是广义位移；平移列单位为 N/mm 或 N·mm/mm，转角列单位为 N/rad 或 N·mm/rad。</p>
+        </div>
+      </section>
+
+      <section class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>输出 \ 输入</th>
+              {% for header in matrix_headers %}
+              <th>{{ header }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in matrix_rows %}
+            <tr>
+              <th>{{ row.label }}</th>
+              {% for value in row.cells %}
+              <td>{{ "%.4e"|format(value) }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel panel-header">
+        <div>
+          <h2>逐球接触明细</h2>
+          <p>用于检查各钢球是否进入接触，以及当前工作点的单球载荷和接触角。</p>
+        </div>
+      </section>
+
+      <section class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>球号</th>
+              <th>角度 (deg)</th>
+              <th>法向载荷 (N)</th>
+              <th>法向趋近量 (um)</th>
+              <th>接触角 (deg)</th>
+              <th>径向分力 (N)</th>
+              <th>轴向分力 (N)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in detail_rows %}
+            <tr class="{{ 'inactive' if not row.is_active }}">
+              <td>{{ row.index }}</td>
+              <td>{{ "%.0f"|format(row.angle_deg) }}</td>
+              <td>{{ "%.3f"|format(row.normal_load_n) if row.is_active else "---" }}</td>
+              <td>{{ "%.4f"|format(row.normal_approach_um) if row.is_active else "---" }}</td>
+              <td>{{ "%.3f"|format(row.contact_angle_deg) if row.is_active else "---" }}</td>
+              <td>{{ "%.3f"|format(row.radial_force_n) if row.is_active else "---" }}</td>
+              <td>{{ "%.3f"|format(row.axial_force_n) if row.is_active else "---" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

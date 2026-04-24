@@ -27,6 +27,13 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("圆锥滚子轴承预压垫片推荐计算器".encode("utf-8"), response.data)
         self.assertIn("生成推荐垫片点".encode("utf-8"), response.data)
 
+    def test_ball_stiffness_page_renders(self) -> None:
+        response = self.client.get("/ball-stiffness")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("B40 球轴承刚度矩阵计算器".encode("utf-8"), response.data)
+        self.assertIn("计算刚度矩阵".encode("utf-8"), response.data)
+
     def test_home_post_renders_lubrication_recommendation(self) -> None:
         response = self.client.post("/", data={})
 
@@ -84,6 +91,14 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("离散推荐点".encode("utf-8"), response.data)
         self.assertIn("2.360 mm".encode("utf-8"), response.data)
         self.assertIn("垫片点比较".encode("utf-8"), response.data)
+
+    def test_ball_stiffness_post_returns_matrix(self) -> None:
+        response = self.client.post("/ball-stiffness", data={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("5×5 刚度矩阵".encode("utf-8"), response.data)
+        self.assertIn("参与接触钢球数".encode("utf-8"), response.data)
+        self.assertIn("Fx (N)".encode("utf-8"), response.data)
 
 
 if __name__ == "__main__":

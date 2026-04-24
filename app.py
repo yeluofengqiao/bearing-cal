@@ -4,6 +4,12 @@ import os
 
 from flask import Flask, Response, render_template, request
 
+from ball_bearing_stiffness import (
+    DOF_LABELS,
+    FORCE_LABELS,
+    BallBearingStiffnessInputs,
+    calculate_ball_bearing_stiffness,
+)
 from bearing_model import (
     BearingCapacitanceModel,
     BearingParameters,
@@ -243,6 +249,164 @@ TAPERED_PRELOAD_INPUT_GROUPS = [
 ]
 
 
+BALL_STIFFNESS_INPUT_GROUPS = [
+    {
+        "title": "B40-119 几何参数",
+        "description": "默认值来自图片中的非标 B40 参数；轨道直径会用于复核理论直径游隙。",
+        "fields": [
+            {
+                "name": "ball_count",
+                "label": "球数 Z",
+                "unit": "个",
+                "type": "int",
+                "default": 8,
+                "help": "图片中 B40-119 为 8 个钢球。",
+            },
+            {
+                "name": "ball_diameter_mm",
+                "label": "球径 Dw",
+                "unit": "mm",
+                "type": "float",
+                "default": 15.875,
+                "help": "钢球直径，直接参与 Hertz 接触刚度。",
+            },
+            {
+                "name": "pitch_diameter_mm",
+                "label": "PCD / 节圆直径 Dm",
+                "unit": "mm",
+                "type": "float",
+                "default": 66.5,
+                "help": "钢球中心节圆直径。B40 图片中 PCD 为 66.5 mm。",
+            },
+            {
+                "name": "inner_raceway_diameter_mm",
+                "label": "内圈轨道径",
+                "unit": "mm",
+                "type": "float",
+                "default": 50.625,
+                "help": "用于和外圈轨道径、球径一起校核直径游隙。",
+            },
+            {
+                "name": "outer_raceway_diameter_mm",
+                "label": "外圈轨道径",
+                "unit": "mm",
+                "type": "float",
+                "default": 82.375,
+                "help": "B40 图片中外圈轨道径为 82.375 mm。",
+            },
+            {
+                "name": "inner_groove_radius_mm",
+                "label": "内圈沟半径",
+                "unit": "mm",
+                "type": "float",
+                "default": 8.075,
+                "help": "内圈沟曲率半径，换算曲率系数 fi = ri / Dw。",
+            },
+            {
+                "name": "outer_groove_radius_mm",
+                "label": "外圈沟半径",
+                "unit": "mm",
+                "type": "float",
+                "default": 8.3125,
+                "help": "外圈沟曲率半径，换算曲率系数 fe = re / Dw。",
+            },
+            {
+                "name": "diametral_clearance_mm",
+                "label": "直径游隙 Pd",
+                "unit": "mm",
+                "type": "float",
+                "default": 0.0,
+                "help": "图片中的轨道径与球径相减得到约 0 mm；若有实测游隙可在这里覆盖。",
+            },
+        ],
+    },
+    {
+        "title": "载荷与力矩",
+        "description": "程序先求给定载荷下的平衡位移，再在该工作点输出切线刚度矩阵。",
+        "fields": [
+            {
+                "name": "fx_n",
+                "label": "径向载荷 Fx",
+                "unit": "N",
+                "type": "float",
+                "default": 1000.0,
+                "help": "默认沿 x 方向施加径向载荷；需要反向时填负值。",
+            },
+            {
+                "name": "fy_n",
+                "label": "径向载荷 Fy",
+                "unit": "N",
+                "type": "float",
+                "default": 0.0,
+                "help": "另一径向正交方向载荷。",
+            },
+            {
+                "name": "fz_n",
+                "label": "轴向载荷 Fz",
+                "unit": "N",
+                "type": "float",
+                "default": 500.0,
+                "help": "没有轴向载荷或预压时，轴向和倾覆刚度会明显偏低。",
+            },
+            {
+                "name": "mx_nmm",
+                "label": "倾覆力矩 Mx",
+                "unit": "N·mm",
+                "type": "float",
+                "default": 0.0,
+                "help": "绕 x 轴的外部力矩。",
+            },
+            {
+                "name": "my_nmm",
+                "label": "倾覆力矩 My",
+                "unit": "N·mm",
+                "type": "float",
+                "default": 0.0,
+                "help": "绕 y 轴的外部力矩。",
+            },
+        ],
+    },
+    {
+        "title": "材料与数值差分",
+        "description": "钢材默认 E=206000 MPa、nu=0.3；差分步长用于求切线刚度。",
+        "fields": [
+            {
+                "name": "elastic_modulus_mpa",
+                "label": "杨氏模量 E",
+                "unit": "MPa",
+                "type": "float",
+                "default": 206000.0,
+                "help": "轴承钢可先按 2.06e5 MPa 估算。",
+            },
+            {
+                "name": "poisson_ratio",
+                "label": "泊松比 nu",
+                "unit": "-",
+                "type": "float",
+                "default": 0.3,
+                "help": "钢材常用 0.3。",
+            },
+            {
+                "name": "translation_step_um",
+                "label": "平移差分步长",
+                "unit": "um",
+                "type": "float",
+                "default": 1.0,
+                "help": "用于 x/y/z 三个平移自由度的中心差分。",
+            },
+            {
+                "name": "rotation_step_urad",
+                "label": "转角差分步长",
+                "unit": "urad",
+                "type": "float",
+                "default": 10.0,
+                "help": "用于 theta_x/theta_y 两个转角自由度的中心差分。",
+            },
+        ],
+    },
+]
+
+
 def iter_group_fields(groups):
     for group in groups:
         for field in group["fields"]:
@@ -270,6 +434,10 @@ TAPERED_DEFAULT_INPUTS = {
     field["name"]: field["default"]
     for field in iter_group_fields(TAPERED_PRELOAD_INPUT_GROUPS)
 }
+BALL_STIFFNESS_DEFAULT_INPUTS = {
+    field["name"]: field["default"]
+    for field in iter_group_fields(BALL_STIFFNESS_INPUT_GROUPS)
+}
 
 
 def parameter_notes():
@@ -292,9 +460,22 @@ def tapered_parameter_notes():
     ]
 
 
+def ball_stiffness_parameter_notes():
+    return [
+        "该页计算 5 自由度切线刚度矩阵，列自由度为 x、y、z、theta_x、theta_y，行输出为 Fx、Fy、Fz、Mx、My。",
+        "模型把外圈固定、内圈发生小位移，逐球计算沟道中心距增量和 Hertz 接触载荷；再对平衡工作点做中心差分。",
+        "默认 B40-119 参数来自图片：Z=8、Dw=15.875 mm、PCD=66.5 mm、ri=8.075 mm、re=8.3125 mm、内外轨道径 50.625/82.375 mm。",
+        "图片参数推得理论直径游隙约为 0 mm；如果你有实测径向游隙或装配预压，建议把直径游隙或载荷重新填入后再看矩阵。",
+        "矩阵是当前载荷点的切线刚度，不是全工况常数；载荷、游隙、预压和差分步长改变后结果都会变化。",
+    ]
+
+
 FIELD_MAP = {field["name"]: field for field in iter_group_fields(INPUT_GROUPS)}
 TAPERED_FIELD_MAP = {
     field["name"]: field for field in iter_group_fields(TAPERED_PRELOAD_INPUT_GROUPS)
+}
+BALL_STIFFNESS_FIELD_MAP = {
+    field["name"]: field for field in iter_group_fields(BALL_STIFFNESS_INPUT_GROUPS)
 }
 
 
@@ -401,6 +582,24 @@ def parse_tapered_inputs(source):
     return values
 
 
+def parse_ball_stiffness_inputs(source):
+    values = {}
+    for name, field in BALL_STIFFNESS_FIELD_MAP.items():
+        raw_value = str(source.get(name, BALL_STIFFNESS_DEFAULT_INPUTS[name])).strip()
+        if raw_value == "":
+            raise ValueError(f"{field['label']} 不能为空。")
+
+        try:
+            if field["type"] == "int":
+                values[name] = int(raw_value)
+            else:
+                values[name] = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{field['label']} 需要输入有效数字。") from exc
+
+    return values
+
+
 def build_parameters(inputs):
     eta0, _, _ = resolve_viscosity(inputs)
     return BearingParameters(
@@ -425,6 +624,28 @@ def build_parameters(inputs):
         eps_r_pps=inputs["eps_r_pps"],
         shear_limit_factor=inputs["shear_limit_factor"],
         max_shear_stress_mpa=inputs["max_shear_stress_mpa"],
+    )
+
+
+def build_ball_stiffness_inputs(values):
+    return BallBearingStiffnessInputs(
+        ball_count=values["ball_count"],
+        ball_diameter_mm=values["ball_diameter_mm"],
+        pitch_diameter_mm=values["pitch_diameter_mm"],
+        inner_groove_radius_mm=values["inner_groove_radius_mm"],
+        outer_groove_radius_mm=values["outer_groove_radius_mm"],
+        inner_raceway_diameter_mm=values["inner_raceway_diameter_mm"],
+        outer_raceway_diameter_mm=values["outer_raceway_diameter_mm"],
+        diametral_clearance_mm=values["diametral_clearance_mm"],
+        elastic_modulus_mpa=values["elastic_modulus_mpa"],
+        poisson_ratio=values["poisson_ratio"],
+        fx_n=values["fx_n"],
+        fy_n=values["fy_n"],
+        fz_n=values["fz_n"],
+        mx_nmm=values["mx_nmm"],
+        my_nmm=values["my_nmm"],
+        translation_step_um=values["translation_step_um"],
+        rotation_step_urad=values["rotation_step_urad"],
     )
 
 
@@ -673,6 +894,40 @@ def run_calculation(inputs):
     return result, rows, summary
 
 
+def run_ball_stiffness_calculation(inputs):
+    result = calculate_ball_bearing_stiffness(build_ball_stiffness_inputs(inputs))
+    matrix_rows = [
+        {
+            "label": row_label,
+            "cells": row_values,
+        }
+        for row_label, row_values in zip(FORCE_LABELS, result.stiffness_matrix)
+    ]
+    detail_rows_for_template = [
+        {
+            "index": detail.index,
+            "angle_deg": detail.angle_deg,
+            "normal_load_n": detail.normal_load_n,
+            "normal_approach_um": detail.normal_approach_um,
+            "contact_angle_deg": detail.contact_angle_deg,
+            "radial_force_n": detail.radial_force_n,
+            "axial_force_n": detail.axial_force_n,
+            "is_active": detail.normal_load_n > 0,
+        }
+        for detail in result.details
+    ]
+    displacement_summary = {
+        "x_um": result.displacement_vector[0] * 1000.0,
+        "y_um": result.displacement_vector[1] * 1000.0,
+        "z_um": result.displacement_vector[2] * 1000.0,
+        "theta_x_urad": result.displacement_vector[3] * 1e6,
+        "theta_y_urad": result.displacement_vector[4] * 1e6,
+        "max_force_residual_n": max(abs(value) for value in result.residual_vector[:3]),
+        "max_moment_residual_nmm": max(abs(value) for value in result.residual_vector[3:]),
+    }
+    return result, matrix_rows, detail_rows_for_template, displacement_summary
+
+
 def build_csv(rows):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -829,6 +1084,41 @@ def tapered_preload():
         point_rows=point_rows,
         error_message=error_message,
         parameter_notes=tapered_parameter_notes(),
+    )
+
+
+@app.route("/ball-stiffness", methods=["GET", "POST"])
+def ball_stiffness():
+    inputs = BALL_STIFFNESS_DEFAULT_INPUTS.copy()
+    result = None
+    matrix_rows = []
+    detail_rows_for_template = []
+    displacement_summary = None
+    error_message = None
+
+    if request.method == "POST":
+        try:
+            inputs = parse_ball_stiffness_inputs(request.form)
+            (
+                result,
+                matrix_rows,
+                detail_rows_for_template,
+                displacement_summary,
+            ) = run_ball_stiffness_calculation(inputs)
+        except ValueError as exc:
+            error_message = str(exc)
+
+    return render_template(
+        "ball_stiffness.html",
+        input_groups=BALL_STIFFNESS_INPUT_GROUPS,
+        inputs=inputs,
+        result=result,
+        matrix_headers=DOF_LABELS,
+        matrix_rows=matrix_rows,
+        detail_rows=detail_rows_for_template,
+        displacement_summary=displacement_summary,
+        error_message=error_message,
+        parameter_notes=ball_stiffness_parameter_notes(),
     )
 
 
