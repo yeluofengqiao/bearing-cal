@@ -74,7 +74,10 @@ class BallBearingStiffnessInputs:
 
     @property
     def effective_modulus_mpa(self):
-        return self.elastic_modulus_mpa / (1.0 - self.poisson_ratio**2)
+        # Hertz contact uses the reduced modulus of two elastic bodies.
+        # For a steel ball and steel race with the same E and nu:
+        # 1 / E* = 2 * (1 - nu^2) / E.
+        return self.elastic_modulus_mpa / (2.0 * (1.0 - self.poisson_ratio**2))
 
     def target_vector(self):
         return np.array(
