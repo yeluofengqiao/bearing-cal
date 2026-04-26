@@ -25,7 +25,7 @@
           <p class="eyebrow">B40-119 Ball Bearing</p>
           <h1>球轴承刚度矩阵计算器</h1>
           <p class="hero-text">
-            输入球轴承几何、材料和外载荷后，程序会求解内圈 5 自由度平衡点，并输出 Fx/Fy/Fz/Mx/My 对 x/y/z/theta_x/theta_y 的切线刚度矩阵。
+            默认按径向合力 Fr 和轴向力 Fa 输入，程序自动换算成 Fx/Fy/Fz；也可以切换到坐标分量输入，再求解 5 自由度切线刚度矩阵。
           </p>
           <div class="hero-actions">
             <a class="ghost-button" href="{{ url_for('index') }}">返回机电联合仿真工具</a>
@@ -59,6 +59,13 @@
             {% for field in group.fields %}
             <label class="field">
               <span>{{ field.label }} {% if field.unit %}({{ field.unit }}){% endif %}</span>
+              {% if field.type == "select" %}
+              <select name="{{ field.name }}">
+                {% for option in field.options %}
+                <option value="{{ option.value }}" {% if inputs[field.name] == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+              </select>
+              {% else %}
               <input
                 type="text"
                 name="{{ field.name }}"
@@ -69,6 +76,7 @@
                 spellcheck="false"
                 required
               />
+              {% endif %}
               {% if field.help %}
               <small class="field-help">{{ field.help }}</small>
               {% endif %}
@@ -127,6 +135,22 @@
       </section>
 
       <section class="summary-grid">
+        <article class="summary-card">
+          <span>输入方式</span>
+          <strong>{{ "Fr + Fa" if load_summary.load_input_mode == "polar" else "Fx / Fy / Fz" }}</strong>
+        </article>
+        <article class="summary-card">
+          <span>等效 Fr / 方向角</span>
+          <strong>{{ "%.1f"|format(load_summary.radial_force_n) }} N / {{ "%.1f"|format(load_summary.radial_force_angle_deg) }} deg</strong>
+        </article>
+        <article class="summary-card">
+          <span>实际 Fx / Fy</span>
+          <strong>{{ "%.1f"|format(load_summary.fx_n) }} / {{ "%.1f"|format(load_summary.fy_n) }} N</strong>
+        </article>
+        <article class="summary-card">
+          <span>实际 Fz / Fa</span>
+          <strong>{{ "%.1f"|format(load_summary.fz_n) }} N</strong>
+        </article>
         <article class="summary-card">
           <span>x / y 平衡位移</span>
           <strong>{{ "%.2f"|format(displacement_summary.x_um) }} / {{ "%.2f"|format(displacement_summary.y_um) }} um</strong>

@@ -1,5 +1,6 @@
 import csv
 import io
+import math
 import os
 
 from flask import Flask, Response, render_template, request
@@ -321,8 +322,55 @@ BALL_STIFFNESS_INPUT_GROUPS = [
         ],
     },
     {
-        "title": "载荷与力矩",
-        "description": "程序先求给定载荷下的平衡位移，再在该工作点输出切线刚度矩阵。",
+        "title": "常用载荷输入",
+        "description": "默认按径向合力 Fr、径向方向角和轴向力 Fa 输入，程序会自动换算成 Fx/Fy/Fz。",
+        "fields": [
+            {
+                "name": "load_input_mode",
+                "label": "载荷输入方式",
+                "type": "select",
+                "default": "polar",
+                "options": [
+                    {
+                        "value": "polar",
+                        "label": "Fr + Fa（推荐）",
+                    },
+                    {
+                        "value": "cartesian",
+                        "label": "Fx / Fy / Fz",
+                    },
+                ],
+                "help": "日常计算建议用 Fr + Fa；已有三维坐标载荷时切换到 Fx / Fy / Fz。",
+            },
+            {
+                "name": "radial_force_n",
+                "label": "径向合力 Fr",
+                "unit": "N",
+                "type": "float",
+                "default": 1000.0,
+                "help": "径向载荷合力大小。若选择 Fx/Fy/Fz 模式，本项仅作为参考显示。",
+            },
+            {
+                "name": "radial_force_angle_deg",
+                "label": "径向力方向角",
+                "unit": "deg",
+                "type": "float",
+                "default": 0.0,
+                "help": "从 +x 方向逆时针到径向合力 Fr 的角度；0 deg 等价于 Fx=Fr、Fy=0。",
+            },
+            {
+                "name": "axial_force_n",
+                "label": "轴向载荷 Fa",
+                "unit": "N",
+                "type": "float",
+                "default": 500.0,
+                "help": "轴向载荷；在模型内部对应 Fz，可输入负值表示反向轴向载荷。",
+            },
+        ],
+    },
+    {
+        "title": "高级载荷分量与力矩",
+        "description": "Fx/Fy/Fz 只在选择坐标分量模式时使用；Mx/My 始终作为倾覆力矩输入。",
         "fields": [
             {
                 "name": "fx_n",
@@ -330,7 +378,7 @@ BALL_STIFFNESS_INPUT_GROUPS = [
                 "unit": "N",
                 "type": "float",
                 "default": 1000.0,
-                "help": "默认沿 x 方向施加径向载荷；需要反向时填负值。",
+                "help": "仅在选择 Fx/Fy/Fz 模式时使用；Fr + Fa 模式会自动换算。",
             },
             {
                 "name": "fy_n",
@@ -338,7 +386,7 @@ BALL_STIFFNESS_INPUT_GROUPS = [
                 "unit": "N",
                 "type": "float",
                 "default": 0.0,
-                "help": "另一径向正交方向载荷。",
+                "help": "仅在选择 Fx/Fy/Fz 模式时使用。",
             },
             {
                 "name": "fz_n",
@@ -346,7 +394,7 @@ BALL_STIFFNESS_INPUT_GROUPS = [
                 "unit": "N",
                 "type": "float",
                 "default": 500.0,
-                "help": "没有轴向载荷或预压时，轴向和倾覆刚度会明显偏低。",
+                "help": "仅在选择 Fx/Fy/Fz 模式时使用；Fr + Fa 模式中 Fz=Fa。",
             },
             {
                 "name": "mx_nmm",
@@ -463,6 +511,7 @@ def tapered_parameter_notes():
 def ball_stiffness_parameter_notes():
     return [
         "该页计算 5 自由度切线刚度矩阵，列自由度为 x、y、z、theta_x、theta_y，行输出为 Fx、Fy、Fz、Mx、My。",
+        "默认载荷输入为 Fr + Fa：Fx = Fr × cos(phi)，Fy = Fr × sin(phi)，Fz = Fa；如果已有坐标分量，可切换为 Fx/Fy/Fz 模式。",
         "模型把外圈固定、内圈发生小位移，逐球计算沟道中心距增量和 Hertz 接触载荷；再对平衡工作点做中心差分。",
         "默认 B40-119 参数来自图片：Z=8、Dw=15.875 mm、PCD=66.5 mm、ri=8.075 mm、re=8.3125 mm、内外轨道径 50.625/82.375 mm。",
         "图片参数推得理论直径游隙约为 0 mm；如果你有实测径向游隙或装配预压，建议把直径游隙或载荷重新填入后再看矩阵。",
@@ -585,6 +634,14 @@ def parse_tapered_inputs(source):
 def parse_ball_stiffness_inputs(source):
     values = {}
     for name, field in BALL_STIFFNESS_FIELD_MAP.items():
+        if field["type"] == "select":
+            raw_value = str(source.get(name, BALL_STIFFNESS_DEFAULT_INPUTS[name])).strip()
+            allowed_values = {option["value"] for option in field["options"]}
+            if raw_value not in allowed_values:
+                raise ValueError(f"{field['label']} 取值无效。")
+            values[name] = raw_value
+            continue
+
         raw_value = str(source.get(name, BALL_STIFFNESS_DEFAULT_INPUTS[name])).strip()
         if raw_value == "":
             raise ValueError(f"{field['label']} 不能为空。")
@@ -598,6 +655,36 @@ def parse_ball_stiffness_inputs(source):
             raise ValueError(f"{field['label']} 需要输入有效数字。") from exc
 
     return values
+
+
+def resolve_ball_load_components(values):
+    load_input_mode = values["load_input_mode"]
+    if load_input_mode == "polar":
+        radial_force_n = values["radial_force_n"]
+        if radial_force_n < 0:
+            raise ValueError("径向合力 Fr 不能为负数；若需反向，请调整径向力方向角。")
+
+        radial_angle_deg = values["radial_force_angle_deg"]
+        radial_angle_rad = math.radians(radial_angle_deg)
+        fx_n = radial_force_n * math.cos(radial_angle_rad)
+        fy_n = radial_force_n * math.sin(radial_angle_rad)
+        fz_n = values["axial_force_n"]
+    else:
+        fx_n = values["fx_n"]
+        fy_n = values["fy_n"]
+        fz_n = values["fz_n"]
+        radial_force_n = math.hypot(fx_n, fy_n)
+        radial_angle_deg = math.degrees(math.atan2(fy_n, fx_n)) if radial_force_n > 0 else 0.0
+
+    return {
+        "load_input_mode": load_input_mode,
+        "fx_n": fx_n,
+        "fy_n": fy_n,
+        "fz_n": fz_n,
+        "radial_force_n": radial_force_n,
+        "radial_force_angle_deg": radial_angle_deg,
+        "axial_force_n": fz_n,
+    }
 
 
 def build_parameters(inputs):
@@ -628,6 +715,7 @@ def build_parameters(inputs):
 
 
 def build_ball_stiffness_inputs(values):
+    load_components = resolve_ball_load_components(values)
     return BallBearingStiffnessInputs(
         ball_count=values["ball_count"],
         ball_diameter_mm=values["ball_diameter_mm"],
@@ -639,9 +727,9 @@ def build_ball_stiffness_inputs(values):
         diametral_clearance_mm=values["diametral_clearance_mm"],
         elastic_modulus_mpa=values["elastic_modulus_mpa"],
         poisson_ratio=values["poisson_ratio"],
-        fx_n=values["fx_n"],
-        fy_n=values["fy_n"],
-        fz_n=values["fz_n"],
+        fx_n=load_components["fx_n"],
+        fy_n=load_components["fy_n"],
+        fz_n=load_components["fz_n"],
         mx_nmm=values["mx_nmm"],
         my_nmm=values["my_nmm"],
         translation_step_um=values["translation_step_um"],
@@ -895,6 +983,7 @@ def run_calculation(inputs):
 
 
 def run_ball_stiffness_calculation(inputs):
+    load_summary = resolve_ball_load_components(inputs)
     result = calculate_ball_bearing_stiffness(build_ball_stiffness_inputs(inputs))
     matrix_rows = [
         {
@@ -925,7 +1014,7 @@ def run_ball_stiffness_calculation(inputs):
         "max_force_residual_n": max(abs(value) for value in result.residual_vector[:3]),
         "max_moment_residual_nmm": max(abs(value) for value in result.residual_vector[3:]),
     }
-    return result, matrix_rows, detail_rows_for_template, displacement_summary
+    return result, matrix_rows, detail_rows_for_template, displacement_summary, load_summary
 
 
 def build_csv(rows):
@@ -1094,6 +1183,7 @@ def ball_stiffness():
     matrix_rows = []
     detail_rows_for_template = []
     displacement_summary = None
+    load_summary = None
     error_message = None
 
     if request.method == "POST":
@@ -1104,6 +1194,7 @@ def ball_stiffness():
                 matrix_rows,
                 detail_rows_for_template,
                 displacement_summary,
+                load_summary,
             ) = run_ball_stiffness_calculation(inputs)
         except ValueError as exc:
             error_message = str(exc)
@@ -1117,6 +1208,7 @@ def ball_stiffness():
         matrix_rows=matrix_rows,
         detail_rows=detail_rows_for_template,
         displacement_summary=displacement_summary,
+        load_summary=load_summary,
         error_message=error_message,
         parameter_notes=ball_stiffness_parameter_notes(),
     )

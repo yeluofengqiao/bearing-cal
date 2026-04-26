@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app import app, build_lubrication_recommendation
+from app import app, build_lubrication_recommendation, resolve_ball_load_components
 
 
 class BearingWebAppTests(unittest.TestCase):
@@ -33,6 +33,7 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("B40 球轴承刚度矩阵计算器".encode("utf-8"), response.data)
         self.assertIn("计算刚度矩阵".encode("utf-8"), response.data)
+        self.assertIn("径向合力 Fr".encode("utf-8"), response.data)
 
     def test_home_post_renders_lubrication_recommendation(self) -> None:
         response = self.client.post("/", data={})
@@ -99,6 +100,21 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("5×5 刚度矩阵".encode("utf-8"), response.data)
         self.assertIn("参与接触钢球数".encode("utf-8"), response.data)
         self.assertIn("Fx (N)".encode("utf-8"), response.data)
+        self.assertIn("实际 Fx / Fy".encode("utf-8"), response.data)
+
+    def test_ball_stiffness_resolves_fr_fa_to_cartesian_components(self) -> None:
+        components = resolve_ball_load_components(
+            {
+                "load_input_mode": "polar",
+                "radial_force_n": 1000.0,
+                "radial_force_angle_deg": 30.0,
+                "axial_force_n": 500.0,
+            }
+        )
+
+        self.assertAlmostEqual(866.0254, components["fx_n"], places=3)
+        self.assertAlmostEqual(500.0, components["fy_n"], places=3)
+        self.assertAlmostEqual(500.0, components["fz_n"], places=3)
 
 
 if __name__ == "__main__":
