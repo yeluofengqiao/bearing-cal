@@ -34,6 +34,8 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("B40 球轴承刚度矩阵计算器".encode("utf-8"), response.data)
         self.assertIn("计算刚度矩阵".encode("utf-8"), response.data)
         self.assertIn("径向合力 Fr".encode("utf-8"), response.data)
+        self.assertNotIn("平移差分步长".encode("utf-8"), response.data)
+        self.assertNotIn("转角差分步长".encode("utf-8"), response.data)
 
     def test_home_post_renders_lubrication_recommendation(self) -> None:
         response = self.client.post("/", data={})

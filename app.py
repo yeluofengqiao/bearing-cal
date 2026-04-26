@@ -415,8 +415,8 @@ BALL_STIFFNESS_INPUT_GROUPS = [
         ],
     },
     {
-        "title": "材料与数值差分",
-        "description": "钢材默认 E=206000 MPa、nu=0.3；差分步长用于求切线刚度。",
+        "title": "材料参数",
+        "description": "钢材默认 E=206000 MPa、nu=0.3；切线刚度的数值差分步长由程序内部固定。",
         "fields": [
             {
                 "name": "elastic_modulus_mpa",
@@ -433,22 +433,6 @@ BALL_STIFFNESS_INPUT_GROUPS = [
                 "type": "float",
                 "default": 0.3,
                 "help": "钢材常用 0.3。",
-            },
-            {
-                "name": "translation_step_um",
-                "label": "平移差分步长",
-                "unit": "um",
-                "type": "float",
-                "default": 1.0,
-                "help": "用于 x/y/z 三个平移自由度的中心差分。",
-            },
-            {
-                "name": "rotation_step_urad",
-                "label": "转角差分步长",
-                "unit": "urad",
-                "type": "float",
-                "default": 10.0,
-                "help": "用于 theta_x/theta_y 两个转角自由度的中心差分。",
             },
         ],
     },
@@ -513,6 +497,7 @@ def ball_stiffness_parameter_notes():
         "该页计算 5 自由度切线刚度矩阵，列自由度为 x、y、z、theta_x、theta_y，行输出为 Fx、Fy、Fz、Mx、My。",
         "默认载荷输入为 Fr + Fa：Fx = Fr × cos(phi)，Fy = Fr × sin(phi)，Fz = Fa；如果已有坐标分量，可切换为 Fx/Fy/Fz 模式。",
         "Hertz 接触采用钢球和沟道两弹性体等效模量 E* = E / [2 × (1 - nu²)]；如果供应商软件使用单体等效模量，刚度会明显偏高。",
+        "切线刚度通过内部中心差分求导得到，微扰量固定为 1 um 和 10 urad，不作为页面输入。",
         "模型把外圈固定、内圈发生小位移，逐球计算沟道中心距增量和 Hertz 接触载荷；再对平衡工作点做中心差分。",
         "默认 B40-119 参数来自图片：Z=8、Dw=15.875 mm、PCD=66.5 mm、ri=8.075 mm、re=8.3125 mm、内外轨道径 50.625/82.375 mm。",
         "图片参数推得理论直径游隙约为 0 mm；如果你有实测径向游隙或装配预压，建议把直径游隙或载荷重新填入后再看矩阵。",
@@ -733,8 +718,8 @@ def build_ball_stiffness_inputs(values):
         fz_n=load_components["fz_n"],
         mx_nmm=values["mx_nmm"],
         my_nmm=values["my_nmm"],
-        translation_step_um=values["translation_step_um"],
-        rotation_step_urad=values["rotation_step_urad"],
+        translation_step_um=BallBearingStiffnessInputs.translation_step_um,
+        rotation_step_urad=BallBearingStiffnessInputs.rotation_step_urad,
     )
 
 
