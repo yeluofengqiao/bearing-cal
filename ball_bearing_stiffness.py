@@ -31,8 +31,6 @@ class BallBearingStiffnessInputs:
     pitch_diameter_mm: float = 66.5
     inner_groove_radius_mm: float = 8.075
     outer_groove_radius_mm: float = 8.3125
-    inner_raceway_diameter_mm: float = 50.625
-    outer_raceway_diameter_mm: float = 82.375
     diametral_clearance_mm: float = 0.0
     elastic_modulus_mpa: float = 206000.0
     poisson_ratio: float = 0.3
@@ -65,14 +63,6 @@ class BallBearingStiffnessInputs:
         return 0.5 * self.pitch_diameter_mm
 
     @property
-    def raceway_derived_clearance_mm(self):
-        return (
-            self.outer_raceway_diameter_mm
-            - self.inner_raceway_diameter_mm
-            - 2.0 * self.ball_diameter_mm
-        )
-
-    @property
     def effective_modulus_mpa(self):
         # Hertz contact uses the reduced modulus of two elastic bodies.
         # For a steel ball and steel race with the same E and nu:
@@ -91,8 +81,6 @@ class BallBearingStiffnessInputs:
             "pitch_diameter_mm": self.pitch_diameter_mm,
             "inner_groove_radius_mm": self.inner_groove_radius_mm,
             "outer_groove_radius_mm": self.outer_groove_radius_mm,
-            "inner_raceway_diameter_mm": self.inner_raceway_diameter_mm,
-            "outer_raceway_diameter_mm": self.outer_raceway_diameter_mm,
             "elastic_modulus_mpa": self.elastic_modulus_mpa,
             "translation_step_um": self.translation_step_um,
             "rotation_step_urad": self.rotation_step_urad,
@@ -126,7 +114,7 @@ class BallBearingStiffnessResult:
     outer_contact_stiffness_n_per_mm15: float
     inner_curvature_ratio: float
     outer_curvature_ratio: float
-    raceway_derived_clearance_mm: float
+    diametral_clearance_mm: float
     active_ball_count: int
     peak_ball_load_n: float
     max_contact_angle_deg: float
@@ -427,7 +415,7 @@ class BallBearingStiffnessModel:
             outer_contact_stiffness_n_per_mm15=float(self.outer_stiffness),
             inner_curvature_ratio=float(self.inputs.inner_curvature_ratio),
             outer_curvature_ratio=float(self.inputs.outer_curvature_ratio),
-            raceway_derived_clearance_mm=float(self.inputs.raceway_derived_clearance_mm),
+            diametral_clearance_mm=float(self.inputs.diametral_clearance_mm),
             active_ball_count=len(active_details),
             peak_ball_load_n=float(peak_ball_load),
             max_contact_angle_deg=float(max_contact_angle),

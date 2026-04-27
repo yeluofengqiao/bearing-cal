@@ -253,7 +253,7 @@ TAPERED_PRELOAD_INPUT_GROUPS = [
 BALL_STIFFNESS_INPUT_GROUPS = [
     {
         "title": "B40-119 几何参数",
-        "description": "默认值来自图片中的非标 B40 参数；轨道直径会用于复核理论直径游隙。",
+        "description": "默认值来自图片中的非标 B40 参数；刚度求解直接使用球径、PCD、沟半径和直径游隙。",
         "fields": [
             {
                 "name": "ball_count",
@@ -280,22 +280,6 @@ BALL_STIFFNESS_INPUT_GROUPS = [
                 "help": "钢球中心节圆直径。B40 图片中 PCD 为 66.5 mm。",
             },
             {
-                "name": "inner_raceway_diameter_mm",
-                "label": "内圈轨道径",
-                "unit": "mm",
-                "type": "float",
-                "default": 50.625,
-                "help": "用于和外圈轨道径、球径一起校核直径游隙。",
-            },
-            {
-                "name": "outer_raceway_diameter_mm",
-                "label": "外圈轨道径",
-                "unit": "mm",
-                "type": "float",
-                "default": 82.375,
-                "help": "B40 图片中外圈轨道径为 82.375 mm。",
-            },
-            {
                 "name": "inner_groove_radius_mm",
                 "label": "内圈沟半径",
                 "unit": "mm",
@@ -317,7 +301,7 @@ BALL_STIFFNESS_INPUT_GROUPS = [
                 "unit": "mm",
                 "type": "float",
                 "default": 0.0,
-                "help": "图片中的轨道径与球径相减得到约 0 mm；若有实测游隙可在这里覆盖。",
+                "help": "B40 图片参数可先按 0 mm；若有实测游隙，直接在这里输入。",
             },
         ],
     },
@@ -499,8 +483,8 @@ def ball_stiffness_parameter_notes():
         "Hertz 接触采用钢球和沟道两弹性体等效模量 E* = E / [2 × (1 - nu²)]；如果供应商软件使用单体等效模量，刚度会明显偏高。",
         "切线刚度通过内部中心差分求导得到，微扰量固定为 1 um 和 10 urad，不作为页面输入。",
         "模型把外圈固定、内圈发生小位移，逐球计算沟道中心距增量和 Hertz 接触载荷；再对平衡工作点做中心差分。",
-        "默认 B40-119 参数来自图片：Z=8、Dw=15.875 mm、PCD=66.5 mm、ri=8.075 mm、re=8.3125 mm、内外轨道径 50.625/82.375 mm。",
-        "图片参数推得理论直径游隙约为 0 mm；如果你有实测径向游隙或装配预压，建议把直径游隙或载荷重新填入后再看矩阵。",
+        "默认 B40-119 参数来自图片：Z=8、Dw=15.875 mm、PCD=66.5 mm、ri=8.075 mm、re=8.3125 mm，Pd 默认 0 mm。",
+        "如果你有实测径向游隙或装配预压，建议把直径游隙或载荷重新填入后再看矩阵。",
         "矩阵是当前载荷点的切线刚度，不是全工况常数；载荷、游隙、预压和差分步长改变后结果都会变化。",
     ]
 
@@ -708,8 +692,6 @@ def build_ball_stiffness_inputs(values):
         pitch_diameter_mm=values["pitch_diameter_mm"],
         inner_groove_radius_mm=values["inner_groove_radius_mm"],
         outer_groove_radius_mm=values["outer_groove_radius_mm"],
-        inner_raceway_diameter_mm=values["inner_raceway_diameter_mm"],
-        outer_raceway_diameter_mm=values["outer_raceway_diameter_mm"],
         diametral_clearance_mm=values["diametral_clearance_mm"],
         elastic_modulus_mpa=values["elastic_modulus_mpa"],
         poisson_ratio=values["poisson_ratio"],

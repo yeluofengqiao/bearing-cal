@@ -36,6 +36,8 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("径向合力 Fr".encode("utf-8"), response.data)
         self.assertNotIn("平移差分步长".encode("utf-8"), response.data)
         self.assertNotIn("转角差分步长".encode("utf-8"), response.data)
+        self.assertNotIn("内圈轨道径".encode("utf-8"), response.data)
+        self.assertNotIn("外圈轨道径".encode("utf-8"), response.data)
 
     def test_home_post_renders_lubrication_recommendation(self) -> None:
         response = self.client.post("/", data={})
@@ -103,6 +105,7 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("参与接触钢球数".encode("utf-8"), response.data)
         self.assertIn("Fx (N)".encode("utf-8"), response.data)
         self.assertIn("实际 Fx / Fy".encode("utf-8"), response.data)
+        self.assertIn("输入直径游隙 Pd".encode("utf-8"), response.data)
 
     def test_ball_stiffness_resolves_fr_fa_to_cartesian_components(self) -> None:
         components = resolve_ball_load_components(
