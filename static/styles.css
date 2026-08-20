@@ -221,7 +221,8 @@ h1 {
   line-height: 1.35;
 }
 
-.field input {
+.field input,
+.field textarea {
   width: 100%;
   border: 1px solid rgba(17, 75, 58, 0.16);
   background: rgba(255, 255, 255, 0.88);
@@ -229,6 +230,12 @@ h1 {
   padding: 14px 15px;
   font: inherit;
   color: var(--ink);
+}
+
+.field textarea {
+  min-height: 260px;
+  resize: vertical;
+  line-height: 1.55;
 }
 
 .field select {
@@ -241,7 +248,8 @@ h1 {
   color: var(--ink);
 }
 
-.field input:focus {
+.field input:focus,
+.field textarea:focus {
   outline: 2px solid rgba(17, 75, 58, 0.28);
   border-color: transparent;
 }
@@ -256,6 +264,10 @@ h1 {
   font-size: 12px;
   font-weight: 500;
   line-height: 1.5;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
 }
 
 .submit-panel {

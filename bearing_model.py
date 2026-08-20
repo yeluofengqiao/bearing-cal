@@ -1,14 +1,19 @@
 import math
 from dataclasses import asdict, dataclass
+from numbers import Integral
 
 import numpy as np
-from scipy.optimize import fsolve
+from scipy.optimize import least_squares
 from scipy.special import ellipe, ellipk
 
 
 def astm_d341_kinematic_viscosity_cst(nu_40_cst, nu_100_cst, temperature_c):
+    if not all(math.isfinite(float(value)) for value in (nu_40_cst, nu_100_cst, temperature_c)):
+        raise ValueError("ASTM D341 输入必须是有限数字。")
     if nu_40_cst <= 0 or nu_100_cst <= 0:
         raise ValueError("ASTM D341 黏度换算要求 nu_40_cst 和 nu_100_cst 都大于 0。")
+    if nu_40_cst <= nu_100_cst:
+        raise ValueError("ASTM D341 要求 40 C 运动黏度大于 100 C 运动黏度。")
 
     temperature_k = temperature_c + 273.15
     if temperature_k <= 0:
@@ -53,10 +58,13 @@ class BallDetail:
     truncation_ratio_pct: float
     film_thickness_um: float
     outer_film_thickness_um: float
+    central_film_thickness_um: float
+    outer_central_film_thickness_um: float
     capacitance_pf: float
     contact_angle_deg: float
     ehl_friction_force_n: float
     ehl_friction_torque_nmm: float
+    ehl_power_loss_w: float
     traction_coeff_inner: float
     traction_coeff_outer: float
     estimated_slip_ratio_inner: float
@@ -75,6 +83,7 @@ class CalculationResult:
     system_capacitance_pf: float
     ehl_friction_torque_nmm: float
     ehl_friction_torque_nm: float
+    ehl_power_loss_w: float
     radial_displacement_mm: float
     axial_displacement_mm: float
     operating_kinematic_viscosity_cst: float
@@ -117,8 +126,22 @@ class BearingParameters:
         return self.Dw * (self.fi + self.fe - 1)
 
     @property
-    def E_prime(self):
+    def reduced_modulus_mpa(self):
+        """Two-body Hertz reduced modulus E* for identical steel bodies."""
+
+        return self.E / (2.0 * (1.0 - self.nu**2))
+
+    @property
+    def ehl_modulus_mpa(self):
+        """Hamrock-Dowson modulus convention, equal to 2 times Hertz E*."""
+
         return self.E / (1 - self.nu**2)
+
+    @property
+    def E_prime(self):
+        """Backward-compatible alias for the EHL modulus convention."""
+
+        return self.ehl_modulus_mpa
 
     @property
     def eps_0(self):
@@ -128,6 +151,9 @@ class BearingParameters:
         return asdict(self)
 
     def validate(self):
+        numeric_values = tuple(asdict(self).values())
+        if any(not math.isfinite(float(value)) for value in numeric_values):
+            raise ValueError("轴承参数必须全部为有限数字。")
         positive_fields = {
             "d": self.d,
             "D": self.D,
@@ -151,6 +177,8 @@ class BearingParameters:
             if value <= 0:
                 raise ValueError(f"{name} 必须大于 0。")
 
+        if isinstance(self.Z, bool) or not isinstance(self.Z, Integral):
+            raise ValueError("钢球数 Z 必须是整数。")
         if self.Z < 1:
             raise ValueError("钢球数 Z 必须至少为 1。")
         if self.Pd < 0:
@@ -191,7 +219,17 @@ class BearingCapacitanceModel:
                 - cos_tau
             )
 
-        e_sol = fsolve(objective, 0.9)[0]
+        solution = least_squares(
+            lambda value: [objective(float(value[0]))],
+            [0.85],
+            bounds=([1e-5], [0.99999]),
+            xtol=1e-12,
+            ftol=1e-12,
+            gtol=1e-12,
+        )
+        if not solution.success or abs(objective(float(solution.x[0]))) > 1e-8:
+            raise ValueError("接触椭圆参数求解未收敛。")
+        e_sol = float(solution.x[0])
         k_val = ellipk(e_sol**2)
         e_val = ellipe(e_sol**2)
         k_ratio = 1 / np.sqrt(1 - e_sol**2)
@@ -208,13 +246,15 @@ class BearingCapacitanceModel:
             rho22 = 2 / (p.Dm + p.Dw)
 
         sum_rho = rho11 + rho12 + rho21 + rho22
+        if sum_rho <= 0.0:
+            raise ValueError("接触曲率组合无效，请复核钢球、节圆和沟曲率参数。")
         diff_rho = (rho11 - rho12) + (rho21 - rho22)
         cos_tau = abs(diff_rho) / sum_rho
 
         k_el, e_el, k_hd = self._solve_elliptical_param(cos_tau)
 
         q_test = 1.0
-        term_common_1n = (3 * q_test) / (2 * sum_rho * p.E_prime)
+        term_common_1n = (3 * q_test) / (2 * sum_rho * p.reduced_modulus_mpa)
         a_star = (2 * (k_hd**2) * e_el / np.pi) ** (1 / 3)
         delta_star = (2 * k_el) / (np.pi * a_star)
 
@@ -228,7 +268,7 @@ class BearingCapacitanceModel:
         if q <= 1e-5:
             return 0.0, 0.0, 0.0, 0.0
 
-        term_common = (3 * q) / (2 * sum_rho * self.params.E_prime)
+        term_common = (3 * q) / (2 * sum_rho * self.params.reduced_modulus_mpa)
         a_star = (2 * (k_ratio**2) * e_val / np.pi) ** (1 / 3)
         b_star = (2 * e_val / (np.pi * k_ratio)) ** (1 / 3)
 
@@ -239,23 +279,33 @@ class BearingCapacitanceModel:
 
         return area, a, b, p_max
 
-    def _central_film_thickness_mm(self, q, rx_m, u_vel, k_hd):
+    def _film_thicknesses_mm(self, q, rx_m, u_vel, k_hd):
         if q <= 1e-5 or rx_m <= 0 or u_vel <= 0:
-            return 0.0
+            return 0.0, 0.0
 
         p = self.params
-        g_param = p.alpha * (p.E_prime * 1e6)
-        u_dimless = (p.eta0 * u_vel) / (p.E_prime * 1e6 * rx_m)
-        w_dimless = q / ((p.E_prime * 1e6) * rx_m**2)
-        k_effect = 1 - 0.61 * np.exp(-0.73 * k_hd)
-        h_dimless = (
+        ehl_modulus_pa = p.ehl_modulus_mpa * 1e6
+        g_param = p.alpha * ehl_modulus_pa
+        u_dimless = (p.eta0 * u_vel) / (ehl_modulus_pa * rx_m)
+        w_dimless = q / (ehl_modulus_pa * rx_m**2)
+        central_effect = 1 - 0.61 * np.exp(-0.73 * k_hd)
+        minimum_effect = 1 - np.exp(-0.68 * k_hd)
+        central_dimless = (
             2.69
             * (u_dimless**0.67)
             * (g_param**0.53)
             * (w_dimless**-0.067)
-            * k_effect
+            * central_effect
         )
-        return h_dimless * rx_m * 1000
+        minimum_dimless = (
+            3.63
+            * (u_dimless**0.68)
+            * (g_param**0.49)
+            * (w_dimless**-0.073)
+            * minimum_effect
+        )
+        scale_mm = rx_m * 1000
+        return central_dimless * scale_mm, minimum_dimless * scale_mm
 
     def _effective_viscosity(self, mean_pressure_pa):
         pressure_term = np.clip(self.params.alpha * mean_pressure_pa, 0.0, 25.0)
@@ -289,6 +339,8 @@ class BearingCapacitanceModel:
         return float(slip_inner), float(slip_outer)
 
     def calculate(self, fr, fa, speed_rpm):
+        if not all(math.isfinite(float(value)) for value in (fr, fa, speed_rpm)):
+            raise ValueError("Fr、Fa、speed_rpm 必须是有限数字。")
         if fr < 0 or fa < 0 or speed_rpm < 0:
             raise ValueError("Fr、Fa、speed_rpm 不能为负数。")
 
@@ -329,20 +381,46 @@ class BearingCapacitanceModel:
                     fz += q * (term_a / l_new)
             return [fx - fr, fz - fa]
 
-        sol_um, _, ier, _ = fsolve(
-            equilibrium_equations,
-            [50.0, 100.0],
-            full_output=True,
-        )
+        load_scale = max(1.0, math.hypot(fr, fa))
+        if fr <= 1e-12 and fa <= 1e-12:
+            sol_um = np.zeros(2)
+            solver_converged = True
+        else:
+            best_solution = None
+            for guess in (
+                np.array([50.0, 100.0]),
+                np.array([20.0, 20.0]),
+                np.array([100.0, 20.0]),
+                np.array([100.0, 100.0]),
+                np.array([250.0, 250.0]),
+            ):
+                solution = least_squares(
+                    lambda values: np.asarray(equilibrium_equations(values)) / load_scale,
+                    guess,
+                    bounds=(np.zeros(2), np.full(2, np.inf)),
+                    x_scale=np.array([50.0, 50.0]),
+                    xtol=1e-11,
+                    ftol=1e-11,
+                    gtol=1e-11,
+                    max_nfev=3000,
+                )
+                if best_solution is None or solution.cost < best_solution.cost:
+                    best_solution = solution
+            sol_um = best_solution.x
+            scaled_residual = np.asarray(equilibrium_equations(sol_um)) / load_scale
+            solver_converged = bool(
+                best_solution.success and np.max(np.abs(scaled_residual)) < 1e-5
+            )
         dr_mm = sol_um[0] * 1e-3
         da_mm = sol_um[1] * 1e-3
 
         total_oil_cap = 0.0
         total_ehl_torque_nm = 0.0
+        total_ehl_power_w = 0.0
         details = []
         u_vel_i = (np.pi * speed_rpm * p.Dm / 120) * (1 - (p.Dw / p.Dm) ** 2) / 1000
         u_vel_e = (np.pi * speed_rpm * p.Dm / 120) * (1 + (p.Dw / p.Dm) ** 2) / 1000
-        pitch_radius_m = 0.5 * p.Dm / 1000
+        shaft_angular_speed_rad_s = 2.0 * np.pi * speed_rpm / 60.0
 
         r_inner = p.fi * p.Dw
         theta_edge_i = np.arccos(1.0 - p.H_i / r_inner)
@@ -362,10 +440,13 @@ class BearingCapacitanceModel:
                         truncation_ratio_pct=0.0,
                         film_thickness_um=0.0,
                         outer_film_thickness_um=0.0,
+                        central_film_thickness_um=0.0,
+                        outer_central_film_thickness_um=0.0,
                         capacitance_pf=0.0,
                         contact_angle_deg=0.0,
                         ehl_friction_force_n=0.0,
                         ehl_friction_torque_nmm=0.0,
+                        ehl_power_loss_w=0.0,
                         traction_coeff_inner=0.0,
                         traction_coeff_outer=0.0,
                         estimated_slip_ratio_inner=0.0,
@@ -384,12 +465,13 @@ class BearingCapacitanceModel:
 
             rx_i = rx_i_mm / 1000
             area_i, a_i, _, pmax_i = self._get_hertz_params(q, sum_rho_i, ki_hd, e_val_i)
-            h_i = self._central_film_thickness_mm(q, rx_i, u_vel_i, ki_hd)
-            inner_film_um = h_i * 1000
+            h_c_i, h_min_i = self._film_thicknesses_mm(q, rx_i, u_vel_i, ki_hd)
+            inner_film_um = h_min_i * 1000
+            inner_central_film_um = h_c_i * 1000
             lambda_i = inner_film_um / p.composite_roughness_um
             c_in = 0.0
-            if h_i > 0:
-                c_in = (p.eps_0 * p.eps_r * area_i * 1e-6) / (h_i * 1e-3) * 1e12
+            if h_c_i > 0:
+                c_in = (p.eps_0 * p.eps_r * area_i * 1e-6) / (h_c_i * 1e-3) * 1e12
 
             s_avail_i = r_inner * (theta_edge_i - alpha_contact)
             if a_i > s_avail_i:
@@ -399,23 +481,30 @@ class BearingCapacitanceModel:
 
             rx_e = rx_e_mm / 1000
             area_e, _, _, _ = self._get_hertz_params(q, sum_rho_e, ke_hd, e_val_e)
-            h_e = self._central_film_thickness_mm(q, rx_e, u_vel_e, ke_hd)
-            outer_film_um = h_e * 1000
+            h_c_e, h_min_e = self._film_thicknesses_mm(q, rx_e, u_vel_e, ke_hd)
+            outer_film_um = h_min_e * 1000
+            outer_central_film_um = h_c_e * 1000
             lambda_e = outer_film_um / p.composite_roughness_um
             c_out = 0.0
-            if h_e > 0:
-                c_out = (p.eps_0 * p.eps_r * area_e * 1e-6) / (h_e * 1e-3) * 1e12
+            if h_c_e > 0:
+                c_out = (p.eps_0 * p.eps_r * area_e * 1e-6) / (h_c_e * 1e-3) * 1e12
 
             area_i_m2 = area_i * 1e-6
             area_e_m2 = area_e * 1e-6
             mean_pressure_i_pa = q / area_i_m2 if area_i_m2 > 0 else 0.0
             mean_pressure_e_pa = q / area_e_m2 if area_e_m2 > 0 else 0.0
-            tau_i = self._ehl_shear_stress_pa(delta_u_i, h_i * 1e-3, mean_pressure_i_pa)
-            tau_e = self._ehl_shear_stress_pa(delta_u_e, h_e * 1e-3, mean_pressure_e_pa)
+            tau_i = self._ehl_shear_stress_pa(delta_u_i, h_c_i * 1e-3, mean_pressure_i_pa)
+            tau_e = self._ehl_shear_stress_pa(delta_u_e, h_c_e * 1e-3, mean_pressure_e_pa)
             friction_force_i = tau_i * area_i_m2
             friction_force_e = tau_e * area_e_m2
             friction_force_ball = friction_force_i + friction_force_e
-            ball_torque_nm = friction_force_ball * pitch_radius_m
+            ball_power_w = friction_force_i * delta_u_i + friction_force_e * delta_u_e
+            ball_torque_nm = (
+                ball_power_w / shaft_angular_speed_rad_s
+                if shaft_angular_speed_rad_s > 0.0
+                else 0.0
+            )
+            total_ehl_power_w += ball_power_w
             total_ehl_torque_nm += ball_torque_nm
 
             if c_in > 0 and c_out > 0:
@@ -432,10 +521,13 @@ class BearingCapacitanceModel:
                     truncation_ratio_pct=float(trunc_ratio_i),
                     film_thickness_um=float(inner_film_um),
                     outer_film_thickness_um=float(outer_film_um),
+                    central_film_thickness_um=float(inner_central_film_um),
+                    outer_central_film_thickness_um=float(outer_central_film_um),
                     capacitance_pf=float(c_ball),
                     contact_angle_deg=float(np.degrees(alpha_contact)),
                     ehl_friction_force_n=float(friction_force_ball),
                     ehl_friction_torque_nmm=float(ball_torque_nm * 1000),
+                    ehl_power_loss_w=float(ball_power_w),
                     traction_coeff_inner=float(friction_force_i / q),
                     traction_coeff_outer=float(friction_force_e / q),
                     estimated_slip_ratio_inner=float(slip_ratio_inner),
@@ -479,6 +571,7 @@ class BearingCapacitanceModel:
             system_capacitance_pf=float(c_system_total),
             ehl_friction_torque_nmm=float(total_ehl_torque_nm * 1000),
             ehl_friction_torque_nm=float(total_ehl_torque_nm),
+            ehl_power_loss_w=float(total_ehl_power_w),
             radial_displacement_mm=float(dr_mm),
             axial_displacement_mm=float(da_mm),
             operating_kinematic_viscosity_cst=float(operating_kinematic_viscosity_cst),
@@ -488,7 +581,7 @@ class BearingCapacitanceModel:
             minimum_outer_film_thickness_um=float(minimum_outer_film_thickness_um),
             minimum_lambda=float(minimum_lambda),
             minimum_outer_lambda=float(minimum_outer_lambda),
-            solver_converged=ier == 1,
+            solver_converged=solver_converged,
             details=details,
         )
 

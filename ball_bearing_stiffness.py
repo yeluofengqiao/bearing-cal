@@ -1,5 +1,6 @@
 import math
 from dataclasses import asdict, dataclass
+from numbers import Integral
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -76,6 +77,13 @@ class BallBearingStiffnessInputs:
         )
 
     def validate(self):
+        numeric_values = {
+            name: value
+            for name, value in asdict(self).items()
+            if name != "ball_count"
+        }
+        if any(not math.isfinite(float(value)) for value in numeric_values.values()):
+            raise ValueError("球轴承刚度输入必须是有限数字。")
         positive_fields = {
             "ball_diameter_mm": self.ball_diameter_mm,
             "pitch_diameter_mm": self.pitch_diameter_mm,
@@ -89,6 +97,8 @@ class BallBearingStiffnessInputs:
             if value <= 0:
                 raise ValueError(f"{name} 必须大于 0。")
 
+        if isinstance(self.ball_count, bool) or not isinstance(self.ball_count, Integral):
+            raise ValueError("钢球数必须是整数。")
         if self.ball_count < 3:
             raise ValueError("钢球数至少需要 3。")
         if self.pitch_diameter_mm <= self.ball_diameter_mm:

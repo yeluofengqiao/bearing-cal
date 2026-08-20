@@ -39,6 +39,14 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertNotIn("内圈轨道径".encode("utf-8"), response.data)
         self.assertNotIn("外圈轨道径".encode("utf-8"), response.data)
 
+    def test_seat_bore_roundness_page_renders(self) -> None:
+        response = self.client.get("/seat-bore-roundness")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("6308 座孔圆度异常影响评估".encode("utf-8"), response.data)
+        self.assertIn("评估圆度影响".encode("utf-8"), response.data)
+        self.assertIn("圆度点列".encode("utf-8"), response.data)
+
     def test_home_post_renders_lubrication_recommendation(self) -> None:
         response = self.client.post("/", data={})
 
@@ -106,6 +114,14 @@ class BearingWebAppTests(unittest.TestCase):
         self.assertIn("Fx (N)".encode("utf-8"), response.data)
         self.assertIn("实际 Fx / Fy".encode("utf-8"), response.data)
         self.assertIn("输入直径游隙 Pd".encode("utf-8"), response.data)
+
+    def test_seat_bore_roundness_post_returns_life_sweep(self) -> None:
+        response = self.client.post("/seat-bore-roundness", data={})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("传递系数扫参结果".encode("utf-8"), response.data)
+        self.assertIn("相对寿命倍率".encode("utf-8"), response.data)
+        self.assertIn("客户回复要点".encode("utf-8"), response.data)
 
     def test_ball_stiffness_resolves_fr_fa_to_cartesian_components(self) -> None:
         components = resolve_ball_load_components(

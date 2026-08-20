@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>6308 座孔圆度寿命影响评估</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <main class="page">
+      <nav class="top-nav">
+        <a class="nav-pill" href="{{ url_for('index') }}">机电联合仿真</a>
+        <a class="nav-pill" href="{{ url_for('tapered_preload') }}">圆锥预压垫片</a>
+        <a class="nav-pill" href="{{ url_for('ball_stiffness') }}">球轴承刚度矩阵</a>
+        <a class="nav-pill active" href="{{ url_for('seat_bore_roundness') }}">6308 座孔圆度</a>
+      </nav>
+
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">E-Drive Reducer Input Shaft</p>
+          <h1>6308 座孔圆度异常影响评估</h1>
+          <p class="hero-text">
+            将座孔圆度图转成角度-径向偏差点列，按外圈变形传递系数折算成局部游隙变化，再比较逐球载荷、疲劳损伤和相对寿命倍率。
+          </p>
+          <div class="hero-actions">
+            <a class="ghost-button" href="{{ url_for('ball_stiffness') }}">打开球轴承刚度矩阵</a>
+            <a class="ghost-button" href="{{ url_for('index') }}">返回机电联合仿真</a>
+          </div>
+        </div>
+        <div class="hero-note">
+          <span>当前评估口径</span>
+          <strong>只输出相对寿命风险</strong>
+          <small>默认圆度点来自图片估读；正式结论必须替换为客户原始点列和实际载荷谱。</small>
+        </div>
+      </section>
+
+      <section class="panel notes-panel">
+        <h2>建模说明</h2>
+        <ul class="notes-list">
+          {% for note in parameter_notes %}
+          <li>{{ note }}</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <form method="post" class="input-stack">
+        {% for group in input_groups %}
+        <section class="panel input-section">
+          <div class="section-head">
+            <h2>{{ group.title }}</h2>
+            <p>{{ group.description }}</p>
+          </div>
+          <div class="input-grid">
+            {% for field in group.fields %}
+            <label class="field {{ 'wide-field' if field.type == 'textarea' else '' }}">
+              <span>{{ field.label }} {% if field.unit %}({{ field.unit }}){% endif %}</span>
+              {% if field.type == "textarea" %}
+              <textarea
+                name="{{ field.name }}"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                required
+              >{{ inputs[field.name] }}</textarea>
+              {% else %}
+              <input
+                type="text"
+                name="{{ field.name }}"
+                value="{{ inputs[field.name] }}"
+                inputmode="{{ 'numeric' if field.type == 'int' else 'decimal' }}"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                required
+              />
+              {% endif %}
+              {% if field.help %}
+              <small class="field-help">{{ field.help }}</small>
+              {% endif %}
+            </label>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+
+        <section class="panel submit-panel">
+          <button type="submit" class="primary-button">评估圆度影响</button>
+        </section>
+      </form>
+
+      {% if error_message %}
+      <section class="panel alert">
+        <strong>输入错误</strong>
+        <p>{{ error_message }}</p>
+      </section>
+      {% endif %}
+
+      {% if result %}
+      <section class="metrics">
+        <article class="metric-card">
+          <span>圆度峰谷值</span>
+          <strong>{{ "%.1f"|format(result.roundness_peak_to_valley_um) }} um</strong>
+        </article>
+        <article class="metric-card">
+          <span>基线最大单球载荷</span>
+          <strong>{{ "%.1f"|format(baseline_summary.peak_ball_load_n) }} N</strong>
+        </article>
+        <article class="metric-card">
+          <span>基线承载钢球数</span>
+          <strong>{{ baseline_summary.active_ball_count }}</strong>
+        </article>
+        <article class="metric-card">
+          <span>基线平衡位移 x/y</span>
+          <strong>{{ "%.1f"|format(baseline_summary.displacement_x_um) }} / {{ "%.1f"|format(baseline_summary.displacement_y_um) }} um</strong>
+        </article>
+        <article class="metric-card">
+          <span>关注传递系数</span>
+          <strong>{{ "%.0f"|format(focus_scenario.transfer_coefficient * 100.0) }}%</strong>
+        </article>
+        <article class="metric-card">
+          <span>关注算例寿命倍率</span>
+          <strong class="{{ 'warn' if focus_scenario.relative_life_ratio < 0.8 else 'good' }}">{{ "%.2f"|format(focus_scenario.relative_life_ratio) }}×</strong>
+        </article>
+      </section>
+
+      <section class="panel panel-header">
+        <div>
+          <h2>传递系数扫参结果</h2>
+          <p>损伤倍率越高，代表按 sum(Q_i^3) 估算的疲劳损伤越集中；相对寿命倍率低于 1 表示寿命下降。</p>
+        </div>
+      </section>
+
+      <section class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>传递系数</th>
+              <th>折算圆度 PV</th>
+              <th>承载钢球数</th>
+              <th>最大单球载荷</th>
+              <th>载荷倍率</th>
+              <th>损伤倍率</th>
+              <th>相对寿命倍率</th>
+              <th>接触应力指数</th>
+              <th>最小局部游隙</th>
+              <th>最危险角度</th>
+              <th>判断</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in scenario_rows %}
+            <tr>
+              <td>{{ "%.0f"|format(row.transfer_coefficient * 100.0) }}%</td>
+              <td>{{ "%.1f"|format(row.deformation_peak_to_valley_um) }} um</td>
+              <td>{{ row.active_ball_count }}</td>
+              <td>{{ "%.1f"|format(row.peak_ball_load_n) }} N</td>
+              <td>{{ "%.2f"|format(row.peak_ball_load_ratio) }}×</td>
+              <td>{{ "%.2f"|format(row.damage_ratio) }}×</td>
+              <td>{{ "%.2f"|format(row.relative_life_ratio) }}×</td>
+              <td>{{ "%.2f"|format(row.contact_stress_index) }}×</td>
+              <td>{{ "%.1f"|format(row.min_local_clearance_um) }} um</td>
+              <td>{{ "%.0f"|format(row.worst_angle_deg) }} deg</td>
+              <td><span class="status-pill {{ row.risk_level }}">{{ row.risk_label }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="deformation-grid">
+        <article class="panel">
+          <h2>客户回复要点</h2>
+          <ul class="recommendation-list">
+            {% for point in result.customer_reply_points %}
+            <li>{{ point }}</li>
+            {% endfor %}
+          </ul>
+        </article>
+        <article class="panel">
+          <h2>需补充数据</h2>
+          <ul class="recommendation-list">
+            {% for item in result.required_customer_data %}
+            <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        </article>
+      </section>
+
+      <section class="panel panel-header">
+        <div>
+          <h2>关注算例逐球明细</h2>
+          <p>下表显示最大传递系数算例中各钢球的圆度偏差、局部游隙、载荷和损伤占比。</p>
+        </div>
+      </section>
+
+      <section class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>球号</th>
+              <th>角度</th>
+              <th>圆度偏差</th>
+              <th>外圈向内量</th>
+              <th>局部游隙</th>
+              <th>法向趋近量</th>
+              <th>单球载荷</th>
+              <th>接触角</th>
+              <th>损伤占比</th>
+              <th>应力指数</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in detail_rows %}
+            <tr class="{{ 'inactive' if not row.is_active }}">
+              <td>{{ row.index }}</td>
+              <td>{{ "%.0f"|format(row.angle_deg) }} deg</td>
+              <td>{{ "%.1f"|format(row.roundness_deviation_um) }} um</td>
+              <td>{{ "%.1f"|format(row.effective_inward_um) }} um</td>
+              <td>{{ "%.1f"|format(row.local_clearance_um) }} um</td>
+              <td>{{ "%.2f"|format(row.normal_approach_um) if row.is_active else "---" }}</td>
+              <td>{{ "%.1f"|format(row.normal_load_n) if row.is_active else "---" }}</td>
+              <td>{{ "%.2f"|format(row.contact_angle_deg) if row.is_active else "---" }}</td>
+              <td>{{ "%.1f"|format(row.damage_share_pct) if row.is_active else "---" }}%</td>
+              <td>{{ "%.2f"|format(row.stress_index) if row.is_active else "---" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+      {% endif %}
+    </main>
+  </body>
+</html>
