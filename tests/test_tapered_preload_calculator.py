@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -55,6 +56,15 @@ class TaperedPreloadCalculatorTests(unittest.TestCase):
 
         self.assertAlmostEqual(result.nominal_shim_mm, 2.6404, places=4)
         self.assertGreater(result.selected_shim_mm, reverse_inputs.zero_endplay_shim_mm)
+
+    def test_non_finite_input_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            TaperedPreloadInputs(
+                **{
+                    **self.inputs.__dict__,
+                    "housing_delta_temp_c": math.nan,
+                }
+            )
 
 
 if __name__ == "__main__":

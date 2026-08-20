@@ -24,6 +24,14 @@ class TaperedPreloadInputs:
     preload_direction: PreloadDirection = "thinner_increases_preload"
 
     def __post_init__(self) -> None:
+        numeric_values = {
+            name: value
+            for name, value in self.__dict__.items()
+            if name != "preload_direction"
+        }
+        for name, value in numeric_values.items():
+            if not math.isfinite(float(value)):
+                raise ValueError(f"{name} 必须是有限数字。")
         positive_fields = {
             "zero_endplay_shim_mm": self.zero_endplay_shim_mm,
             "left_bearing_stiffness_n_per_mm": self.left_bearing_stiffness_n_per_mm,
@@ -192,6 +200,8 @@ def calculate_tapered_preload(inputs: TaperedPreloadInputs) -> TaperedPreloadRes
         evaluate_shim(inputs, shim_mm, nominal_shim_mm=nominal_shim_mm)
         for shim_mm in build_candidate_thicknesses(nominal_shim_mm, inputs.shim_step_mm)
     )
+    if not candidate_points:
+        raise ValueError("目标预紧需要的理论垫片厚度不为正，当前垫片方案没有可制造候选点。")
     selected_point = select_recommended_point(inputs, nominal_shim_mm, candidate_points)
 
     return TaperedPreloadResult(

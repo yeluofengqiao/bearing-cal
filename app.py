@@ -21,6 +21,14 @@ from tapered_preload_calculator import (
     TaperedPreloadInputs,
     calculate_tapered_preload,
 )
+from seat_bore_roundness import (
+    SeatBoreRoundnessInputs,
+    calculate_seat_bore_roundness,
+    format_roundness_points,
+    format_transfer_coefficients,
+    parse_roundness_points,
+    parse_transfer_coefficients,
+)
 
 
 app = Flask(__name__)
@@ -423,6 +431,140 @@ BALL_STIFFNESS_INPUT_GROUPS = [
 ]
 
 
+SEAT_BORE_ROUNDNESS_INPUT_GROUPS = [
+    {
+        "title": "6308 轴承与工况",
+        "description": "默认按 6308 深沟球轴承和输入轴承载区方向建模；径向力方向角 0 deg 表示承载区在圆度点列 0 deg 方向。",
+        "fields": [
+            {
+                "name": "radial_load_n",
+                "label": "径向载荷 Fr",
+                "unit": "N",
+                "type": "float",
+                "default": 2000.0,
+                "help": "目前没有客户载荷谱时先用工程假设值；正式报告需要替换成输入轴实际载荷谱。",
+            },
+            {
+                "name": "radial_load_angle_deg",
+                "label": "径向力方向角",
+                "unit": "deg",
+                "type": "float",
+                "default": 0.0,
+                "help": "用于把载荷方向和圆度图相位对齐；0 deg 表示径向力指向圆度点列 0 deg。",
+            },
+            {
+                "name": "axial_load_n",
+                "label": "轴向载荷 Fa",
+                "unit": "N",
+                "type": "float",
+                "default": 0.0,
+                "help": "没有实测轴向力时可先填 0；如果有斜齿轮轴向力，应按实际方向输入。",
+            },
+            {
+                "name": "diametral_clearance_mm",
+                "label": "直径游隙 Pd",
+                "unit": "mm",
+                "type": "float",
+                "default": 0.015,
+                "help": "装配前轴承直径游隙；圆度变形会在局部进一步吃掉这部分游隙。",
+            },
+            {
+                "name": "profile_phase_deg",
+                "label": "圆度轮廓相位",
+                "unit": "deg",
+                "type": "float",
+                "default": 0.0,
+                "help": "把圆度图旋转到轴承坐标。若承载区不是点列 0 deg，可用该项调整。",
+            },
+            {
+                "name": "transfer_coefficients",
+                "label": "外圈变形传递系数",
+                "unit": "-",
+                "type": "coefficients",
+                "default": "0.25, 0.5, 1.0",
+                "help": "按 25% / 50% / 100% 做包络，避免把座孔误差直接等同于滚道误差。",
+            },
+        ],
+    },
+    {
+        "title": "6308 几何与材料",
+        "description": "默认几何按 6308：Z=8、Dw=15.081 mm、PCD=73 mm、fi=0.52、fe=0.53。",
+        "fields": [
+            {
+                "name": "ball_count",
+                "label": "钢球数 Z",
+                "unit": "个",
+                "type": "int",
+                "default": 8,
+                "help": "6308 常用 8 个钢球；若实际供应状态不同，应按图纸或实物修正。",
+            },
+            {
+                "name": "ball_diameter_mm",
+                "label": "钢球直径 Dw",
+                "unit": "mm",
+                "type": "float",
+                "default": 15.081,
+                "help": "影响 Hertz 接触刚度和载荷分布。",
+            },
+            {
+                "name": "pitch_diameter_mm",
+                "label": "节圆直径 Dm",
+                "unit": "mm",
+                "type": "float",
+                "default": 73.0,
+                "help": "钢球中心节圆直径；正式计算建议使用内部图纸值。",
+            },
+            {
+                "name": "inner_groove_radius_mm",
+                "label": "内圈沟半径",
+                "unit": "mm",
+                "type": "float",
+                "default": 15.081 * 0.52,
+                "help": "默认由 fi=0.52 换算得到。",
+            },
+            {
+                "name": "outer_groove_radius_mm",
+                "label": "外圈沟半径",
+                "unit": "mm",
+                "type": "float",
+                "default": 15.081 * 0.53,
+                "help": "默认由 fe=0.53 换算得到。",
+            },
+            {
+                "name": "elastic_modulus_mpa",
+                "label": "杨氏模量 E",
+                "unit": "MPa",
+                "type": "float",
+                "default": 206000.0,
+                "help": "轴承钢可先按 206000 MPa。",
+            },
+            {
+                "name": "poisson_ratio",
+                "label": "泊松比 nu",
+                "unit": "-",
+                "type": "float",
+                "default": 0.3,
+                "help": "轴承钢常用 0.3。",
+            },
+        ],
+    },
+    {
+        "title": "圆度图数字化点列",
+        "description": "每行一个点：角度, 径向偏差(mm)。负值按座孔半径偏小理解，会在对应角度产生外圈向内挤压风险。",
+        "fields": [
+            {
+                "name": "roundness_points",
+                "label": "圆度点列",
+                "unit": "deg, mm",
+                "type": "textarea",
+                "default": format_roundness_points(SeatBoreRoundnessInputs().roundness_points),
+                "help": "当前默认值是按图片估读的轮廓点，只适合内部预评估；客户给出 CMM 原始数据后应直接替换。",
+            },
+        ],
+    },
+]
+
+
 def iter_group_fields(groups):
     for group in groups:
         for field in group["fields"]:
@@ -454,14 +596,18 @@ BALL_STIFFNESS_DEFAULT_INPUTS = {
     field["name"]: field["default"]
     for field in iter_group_fields(BALL_STIFFNESS_INPUT_GROUPS)
 }
+SEAT_BORE_ROUNDNESS_DEFAULT_INPUTS = {
+    field["name"]: field["default"]
+    for field in iter_group_fields(SEAT_BORE_ROUNDNESS_INPUT_GROUPS)
+}
 
 
 def parameter_notes():
     return [
         "如果输入 ν40 和 ν100，程序会先按 ASTM D341 计算当前温度下的运动黏度，再结合密度换算为动力黏度 eta0；否则直接使用手动输入的 eta0。",
         "κ 按参考黏度法计算：κ = ν / ν1，其中 ν1 由节圆直径 Dm 和转速 n 估算；若你要和 SKF/NSK 手册对表，请确保 Dm 与目录值一致。",
-        "λ 按 λ = h / σ 计算，h 使用当前 EHL 膜厚模型，σ 为综合粗糙度；如果没有粗糙度实测值，可先用 0.052 um 做对比估算。",
-        "EHL 摩擦力矩按油膜剪切求解：程序会根据沟道曲率系数 fi/fe、节圆与钢球尺寸比 Dw/Dm，以及每个受载钢球的接触角自动估算内圈和外圈滑滚比。",
+        "λ 按 λ = h_min / σ 计算，h_min 使用 Hamrock-Dowson 最小膜厚；中央膜厚保留给电容和油膜剪切近似。",
+        "EHL 摩擦力矩按能量闭合：逐接触剪切耗散功率求和后除以轴角速度；滑滚比和牵引模型仍需要实测力矩标定。",
         "内径 d、外径 D、宽度 B 目前主要用于几何描述和 PPS 层电容计算，其中 D 与 B 已直接参与计算。",
     ]
 
@@ -489,12 +635,25 @@ def ball_stiffness_parameter_notes():
     ]
 
 
+def seat_bore_roundness_parameter_notes():
+    return [
+        "该页用于客户 6308 输入轴座孔圆度异常的预评估，只输出相对寿命倍率和风险方向，不替代正式寿命报告。",
+        "圆度点列按座孔径向偏差输入：负值代表孔半径偏小，模型会把它按传递系数折算成外圈局部向内变形。",
+        "损伤指标按深沟球轴承常用疲劳指数 p=3 比较 sum(Q_i^3)，因此输出的是相对寿命倍率，不是绝对小时数。",
+        "默认传递系数 25% / 50% / 100% 是包络扫参；正式结论需要外圈装入后外径或沟道圆度复测来校准传递比例。",
+        "圆度图相位必须和承载区方向对齐；如果长轴或低谷方向落在承载区，峰值单球载荷和局部疲劳损伤会被放大。",
+    ]
+
+
 FIELD_MAP = {field["name"]: field for field in iter_group_fields(INPUT_GROUPS)}
 TAPERED_FIELD_MAP = {
     field["name"]: field for field in iter_group_fields(TAPERED_PRELOAD_INPUT_GROUPS)
 }
 BALL_STIFFNESS_FIELD_MAP = {
     field["name"]: field for field in iter_group_fields(BALL_STIFFNESS_INPUT_GROUPS)
+}
+SEAT_BORE_ROUNDNESS_FIELD_MAP = {
+    field["name"]: field for field in iter_group_fields(SEAT_BORE_ROUNDNESS_INPUT_GROUPS)
 }
 
 
@@ -517,10 +676,13 @@ def detail_rows(result):
                 "truncation_status": truncation_status,
                 "film_thickness_um": detail.film_thickness_um,
                 "outer_film_thickness_um": detail.outer_film_thickness_um,
+                "central_film_thickness_um": detail.central_film_thickness_um,
+                "outer_central_film_thickness_um": detail.outer_central_film_thickness_um,
                 "capacitance_pf": detail.capacitance_pf,
                 "contact_angle_deg": detail.contact_angle_deg,
                 "ehl_friction_force_n": detail.ehl_friction_force_n,
                 "ehl_friction_torque_nmm": detail.ehl_friction_torque_nmm,
+                "ehl_power_loss_w": detail.ehl_power_loss_w,
                 "traction_coeff_inner": detail.traction_coeff_inner,
                 "traction_coeff_outer": detail.traction_coeff_outer,
                 "estimated_slip_ratio_inner": detail.estimated_slip_ratio_inner,
@@ -627,6 +789,32 @@ def parse_ball_stiffness_inputs(source):
     return values
 
 
+def parse_seat_bore_roundness_inputs(source):
+    values = {}
+    for name, field in SEAT_BORE_ROUNDNESS_FIELD_MAP.items():
+        raw_value = str(source.get(name, SEAT_BORE_ROUNDNESS_DEFAULT_INPUTS[name])).strip()
+        if raw_value == "":
+            raise ValueError(f"{field['label']} 不能为空。")
+
+        if field["type"] == "textarea":
+            parse_roundness_points(raw_value)
+            values[name] = raw_value
+            continue
+        if field["type"] == "coefficients":
+            values[name] = format_transfer_coefficients(parse_transfer_coefficients(raw_value))
+            continue
+
+        try:
+            if field["type"] == "int":
+                values[name] = int(raw_value)
+            else:
+                values[name] = float(raw_value)
+        except ValueError as exc:
+            raise ValueError(f"{field['label']} 需要输入有效数字。") from exc
+
+    return values
+
+
 def resolve_ball_load_components(values):
     load_input_mode = values["load_input_mode"]
     if load_input_mode == "polar":
@@ -702,6 +890,25 @@ def build_ball_stiffness_inputs(values):
         my_nmm=values["my_nmm"],
         translation_step_um=BallBearingStiffnessInputs.translation_step_um,
         rotation_step_urad=BallBearingStiffnessInputs.rotation_step_urad,
+    )
+
+
+def build_seat_bore_roundness_inputs(values):
+    return SeatBoreRoundnessInputs(
+        ball_count=values["ball_count"],
+        ball_diameter_mm=values["ball_diameter_mm"],
+        pitch_diameter_mm=values["pitch_diameter_mm"],
+        inner_groove_radius_mm=values["inner_groove_radius_mm"],
+        outer_groove_radius_mm=values["outer_groove_radius_mm"],
+        diametral_clearance_mm=values["diametral_clearance_mm"],
+        elastic_modulus_mpa=values["elastic_modulus_mpa"],
+        poisson_ratio=values["poisson_ratio"],
+        radial_load_n=values["radial_load_n"],
+        radial_load_angle_deg=values["radial_load_angle_deg"],
+        axial_load_n=values["axial_load_n"],
+        profile_phase_deg=values["profile_phase_deg"],
+        transfer_coefficients=parse_transfer_coefficients(values["transfer_coefficients"]),
+        roundness_points=parse_roundness_points(values["roundness_points"]),
     )
 
 
@@ -933,6 +1140,7 @@ def build_summary(result, rows):
         "minimum_outer_lambda": result.minimum_outer_lambda,
         "total_ehl_torque_nmm": result.ehl_friction_torque_nmm,
         "total_ehl_torque_nm": result.ehl_friction_torque_nm,
+        "total_ehl_power_w": result.ehl_power_loss_w,
         "solver_status": "求解收敛" if result.solver_converged else "求解未收敛",
         "recommendation": recommendation,
     }
@@ -985,6 +1193,74 @@ def run_ball_stiffness_calculation(inputs):
     return result, matrix_rows, detail_rows_for_template, displacement_summary, load_summary
 
 
+def build_roundness_scenario_rows(result):
+    rows = []
+    for scenario in result.scenarios:
+        if scenario.relative_life_ratio < 0.5:
+            risk_level = "danger"
+            risk_label = "高风险"
+        elif scenario.relative_life_ratio < 0.8:
+            risk_level = "warn"
+            risk_label = "需复核"
+        else:
+            risk_level = "good"
+            risk_label = "相对温和"
+        rows.append(
+            {
+                "transfer_coefficient": scenario.transfer_coefficient,
+                "deformation_peak_to_valley_um": scenario.deformation_peak_to_valley_um,
+                "active_ball_count": scenario.active_ball_count,
+                "peak_ball_load_n": scenario.peak_ball_load_n,
+                "peak_ball_load_ratio": scenario.peak_ball_load_ratio,
+                "damage_ratio": scenario.damage_ratio,
+                "relative_life_ratio": scenario.relative_life_ratio,
+                "contact_stress_index": scenario.contact_stress_index,
+                "min_local_clearance_um": scenario.min_local_clearance_um,
+                "worst_angle_deg": scenario.worst_angle_deg,
+                "solver_converged": scenario.solver_converged,
+                "risk_level": risk_level,
+                "risk_label": risk_label,
+            }
+        )
+    return rows
+
+
+def build_roundness_detail_rows(scenario):
+    return [
+        {
+            "index": detail.index,
+            "angle_deg": detail.angle_deg,
+            "roundness_deviation_um": detail.roundness_deviation_um,
+            "effective_inward_um": detail.effective_inward_um,
+            "local_clearance_um": detail.local_clearance_um,
+            "normal_approach_um": detail.normal_approach_um,
+            "normal_load_n": detail.normal_load_n,
+            "contact_angle_deg": detail.contact_angle_deg,
+            "damage_share_pct": detail.damage_share_pct,
+            "stress_index": detail.stress_index,
+            "is_active": detail.normal_load_n > 0,
+        }
+        for detail in scenario.details
+    ]
+
+
+def run_seat_bore_roundness_calculation(inputs):
+    result = calculate_seat_bore_roundness(build_seat_bore_roundness_inputs(inputs))
+    scenario_rows = build_roundness_scenario_rows(result)
+    focus_scenario = result.scenarios[-1] if result.scenarios else result.baseline
+    detail_rows_for_template = build_roundness_detail_rows(focus_scenario)
+    baseline_summary = {
+        "peak_ball_load_n": result.baseline.peak_ball_load_n,
+        "damage_index": result.baseline.damage_index,
+        "active_ball_count": result.baseline.active_ball_count,
+        "displacement_x_um": result.baseline.displacement_x_um,
+        "displacement_y_um": result.baseline.displacement_y_um,
+        "displacement_z_um": result.baseline.displacement_z_um,
+        "solver_converged": result.baseline.solver_converged,
+    }
+    return result, scenario_rows, detail_rows_for_template, baseline_summary, focus_scenario
+
+
 def build_csv(rows):
     buffer = io.StringIO()
     writer = csv.writer(buffer)
@@ -997,6 +1273,8 @@ def build_csv(rows):
             "truncation_ratio_pct",
             "film_thickness_inner_um",
             "film_thickness_outer_um",
+            "central_film_thickness_inner_um",
+            "central_film_thickness_outer_um",
             "lambda_inner",
             "lambda_outer",
             "capacitance_pf",
@@ -1004,6 +1282,7 @@ def build_csv(rows):
             "estimated_slip_ratio_outer",
             "ehl_friction_force_n",
             "ehl_friction_torque_nmm",
+            "ehl_power_loss_w",
             "traction_coeff_inner",
             "traction_coeff_outer",
         ]
@@ -1018,6 +1297,8 @@ def build_csv(rows):
                 f"{row['truncation_ratio_pct']:.4f}",
                 f"{row['film_thickness_um']:.6f}",
                 f"{row['outer_film_thickness_um']:.6f}",
+                f"{row['central_film_thickness_um']:.6f}",
+                f"{row['outer_central_film_thickness_um']:.6f}",
                 f"{row['lambda_value']:.6f}",
                 f"{row['outer_lambda_value']:.6f}",
                 f"{row['capacitance_pf']:.6f}",
@@ -1025,6 +1306,7 @@ def build_csv(rows):
                 f"{row['estimated_slip_ratio_outer']:.6f}",
                 f"{row['ehl_friction_force_n']:.6f}",
                 f"{row['ehl_friction_torque_nmm']:.6f}",
+                f"{row['ehl_power_loss_w']:.9f}",
                 f"{row['traction_coeff_inner']:.6f}",
                 f"{row['traction_coeff_outer']:.6f}",
             ]
@@ -1179,6 +1461,43 @@ def ball_stiffness():
         load_summary=load_summary,
         error_message=error_message,
         parameter_notes=ball_stiffness_parameter_notes(),
+    )
+
+
+@app.route("/seat-bore-roundness", methods=["GET", "POST"])
+def seat_bore_roundness():
+    inputs = SEAT_BORE_ROUNDNESS_DEFAULT_INPUTS.copy()
+    result = None
+    scenario_rows = []
+    detail_rows_for_template = []
+    baseline_summary = None
+    focus_scenario = None
+    error_message = None
+
+    if request.method == "POST":
+        try:
+            inputs = parse_seat_bore_roundness_inputs(request.form)
+            (
+                result,
+                scenario_rows,
+                detail_rows_for_template,
+                baseline_summary,
+                focus_scenario,
+            ) = run_seat_bore_roundness_calculation(inputs)
+        except ValueError as exc:
+            error_message = str(exc)
+
+    return render_template(
+        "seat_bore_roundness.html",
+        input_groups=SEAT_BORE_ROUNDNESS_INPUT_GROUPS,
+        inputs=inputs,
+        result=result,
+        scenario_rows=scenario_rows,
+        detail_rows=detail_rows_for_template,
+        baseline_summary=baseline_summary,
+        focus_scenario=focus_scenario,
+        error_message=error_message,
+        parameter_notes=seat_bore_roundness_parameter_notes(),
     )
 
 
